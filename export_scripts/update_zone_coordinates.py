@@ -40,12 +40,12 @@ BLOCK_SIZE = 2  # Each block is 2x2 tiles
 
 
 def get_map_dimensions(cursor, map_id):
-    """Get the width and height of a map in tiles"""
+    """Get the width and height of a map in tiles (blocks * 2)"""
     cursor.execute(
         """
-        SELECT MAX(x) - MIN(x) + 1, MAX(y) - MIN(y) + 1 
-        FROM tiles 
-        WHERE map_id = ?
+        SELECT width * 2, height * 2 
+        FROM maps 
+        WHERE id = ?
         """,
         (map_id,),
     )
@@ -53,10 +53,10 @@ def get_map_dimensions(cursor, map_id):
 
 
 def update_map_coordinates(conn, map_id, x_offset, y_offset):
-    """Update the coordinates of a map by applying the given offsets"""
+    """Update the coordinates of a map in the tiles table and save the position metadata"""
     cursor = conn.cursor()
 
-    # Update the coordinates
+    # 1. Update the actual tiles if they exist
     cursor.execute(
         """
         UPDATE tiles
@@ -64,6 +64,18 @@ def update_map_coordinates(conn, map_id, x_offset, y_offset):
         WHERE map_id = ?
         """,
         (x_offset, y_offset, map_id),
+    )
+
+    # 2. Save the offset to the metadata table so other scripts (like tile generation) can use it
+    cursor.execute("SELECT name FROM maps WHERE id = ?", (map_id,))
+    map_name = cursor.fetchone()[0]
+    
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO overworld_map_positions (map_id, map_name, x_offset, y_offset)
+        VALUES (?, ?, ?, ?)
+        """,
+        (map_id, map_name, x_offset, y_offset),
     )
 
     conn.commit()

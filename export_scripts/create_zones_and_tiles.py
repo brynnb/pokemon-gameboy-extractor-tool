@@ -468,30 +468,6 @@ def populate_tiles(conn, block_pos_to_image_id):
 
             block_data = block_data_row[0]
 
-            # Check if any of the tiles in this block are in the collision_tiles table
-            # If so, mark the entire block as non-walkable
-            is_walkable = raw_is_walkable
-
-            if has_collision_tiles:
-                # Check each tile in the block
-                for tile_pos in range(len(block_data)):
-                    tile_id = block_data[tile_pos]
-
-                    # Check if this tile is in the collision_tiles table
-                    cursor.execute(
-                        """
-                        SELECT COUNT(*) FROM collision_tiles 
-                        WHERE tileset_id = ? AND tile_id = ?
-                        """,
-                        (raw_tileset_id, tile_id),
-                    )
-                    count = cursor.fetchone()[0]
-
-                    # If any tile in the block is non-walkable, the entire block is non-walkable
-                    if count > 0:
-                        is_walkable = 0
-                        break
-
             # Each block corresponds to 4 tiles (2x2 grid)
             # We need to create 4 entries in the tiles table
             for position in range(4):
@@ -516,6 +492,33 @@ def populate_tiles(conn, block_pos_to_image_id):
                     if not tile_image_id:
                         continue
 
+                # Determine walkability for THIS 16x16 tile (2x2 8x8 tiles)
+                # A 16x16 tile is walkable ONLY if all its 8x8 tiles are walkable
+                is_tile_walkable = 1
+                if has_collision_tiles:
+                    # Phaser tile position mapping (each is 2x2 tiles):
+                    # 0: TL (0,1,4,5), 1: TR (2,3,6,7), 2: BL (8,9,12,13), 3: BR (10,11,14,15)
+                    tile_sub_indices = []
+                    if position == 0: tile_sub_indices = [0, 1, 4, 5]
+                    elif position == 1: tile_sub_indices = [2, 3, 6, 7]
+                    elif position == 2: tile_sub_indices = [8, 9, 12, 13]
+                    elif position == 3: tile_sub_indices = [10, 11, 14, 15]
+
+                    for sub_idx in tile_sub_indices:
+                        if sub_idx < len(block_data):
+                            t_id = block_data[sub_idx]
+                            cursor.execute(
+                                "SELECT COUNT(*) FROM collision_tiles WHERE tileset_id = ? AND tile_id = ?",
+                                (raw_tileset_id, t_id),
+                            )
+                            if cursor.fetchone()[0] == 0:
+                                # Not in walkable list -> solid
+                                is_tile_walkable = 0
+                                break
+                        else:
+                            is_tile_walkable = 0
+                            break
+
                 # Add to map tiles
                 map_tiles.append(
                     (
@@ -526,7 +529,7 @@ def populate_tiles(conn, block_pos_to_image_id):
                         map_id,
                         tile_image_id,
                         is_overworld,
-                        is_walkable,  # Use the updated walkable value
+                        is_tile_walkable,
                     )
                 )
 
