@@ -146,8 +146,13 @@ def get_map_id_for_map(map_name, cursor):
 
 def convert_camel_to_upper_underscore(name):
     """Convert CamelCase to UPPER_CASE_WITH_UNDERSCORES"""
-    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
+    # Insert underscore between lowercase and uppercase (e.g. CamelCase -> Camel_Case)
+    s1 = re.sub("([a-z])([A-Z])", r"\1_\2", name)
+    # Insert underscore between upper and upper-lower (e.g. MapHeader -> Map_Header)
+    s2 = re.sub("([A-Z])([A-Z][a-z])", r"\1_\2", s1)
+    # Insert underscore between letters and digits (e.g. Route16 -> Route_16)
+    s3 = re.sub("([a-zA-Z])([0-9])", r"\1_\2", s2)
+    return s3.upper()
 
 
 def convert_upper_underscore_to_camel(name):

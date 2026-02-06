@@ -44,6 +44,7 @@ def create_database():
         action_type TEXT,
         action_direction TEXT,
         item_id INTEGER,
+        movement_type TEXT DEFAULT 'LAND',
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (item_id) REFERENCES items (id)
     )
@@ -62,8 +63,13 @@ def get_all_maps(cursor):
 
 def convert_camel_to_upper_underscore(name):
     """Convert CamelCase to UPPER_CASE_WITH_UNDERSCORES"""
-    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).upper()
+    # Insert underscore between lowercase and uppercase (e.g. CamelCase -> Camel_Case)
+    s1 = re.sub("([a-z])([A-Z])", r"\1_\2", name)
+    # Insert underscore between upper and upper-lower (e.g. MapHeader -> Map_Header)
+    s2 = re.sub("([A-Z])([A-Z][a-z])", r"\1_\2", s1)
+    # Insert underscore between letters and digits (e.g. Route16 -> Route_16)
+    s3 = re.sub("([a-zA-Z])([0-9])", r"\1_\2", s2)
+    return s3.upper()
 
 
 def get_map_id_for_map(map_name, cursor):
@@ -119,6 +125,15 @@ def parse_bg_events(content, map_name):
         y = int(match.group(2))
         text_id = match.group(3)
 
+        # Determine if we should show a sprite for this sign
+        # Building signs and informational signposts are already visible in the background tiles
+        sprite_name = "SPRITE_SIGN"
+        if any(keyword in text_id for keyword in ["MART_SIGN", "POKECENTER_SIGN", "GYM_SIGN", "TRAINER_TIPS", "CITY_SIGN", "TOWN_SIGN", "ACADEMY_SIGN", "POKEDEX_FAN_CLUB_SIGN"]):
+            sprite_name = None
+        # Also generally hide things just named "_SIGN" since they are tiles
+        elif text_id.endswith("_SIGN"):
+            sprite_name = None
+
         signs.append(
             {
                 "name": f"{map_name}_SIGN_{i+1}",
@@ -128,7 +143,7 @@ def parse_bg_events(content, map_name):
                 "local_x": x,
                 "local_y": y,
                 "text": text_id,
-                "sprite_name": "SPRITE_SIGN",  # Default sprite for signs
+                "sprite_name": sprite_name,
             }
         )
 
@@ -224,6 +239,18 @@ def parse_object_events(content, map_name, cursor):
             if item_match:
                 item_id = int(item_match.group(1))
 
+        # Determine movement type based on sprite
+        movement_type = 'LAND'
+        if sprite in ["SPRITE_SEEL", "SPRITE_LAPRAS", "SPRITE_SWIMMER", "SPRITE_WATER_NPC"]:
+            movement_type = 'WATER'
+        elif sprite == "SPRITE_PLAYER": # Players can do both (eventually)
+            movement_type = 'BOTH'
+
+        # Normalize direction
+        direction = action_direction
+        if direction == "NONE" or "MOVEMENT_BYTE" in direction:
+            direction = "DOWN"
+
         objects.append(
             {
                 "name": f"{map_name}_{'ITEM' if object_type == OBJECT_TYPE_ITEM else 'NPC'}_{i+1}",
@@ -236,8 +263,9 @@ def parse_object_events(content, map_name, cursor):
                 "sprite_name": sprite,
                 "text": text_id,
                 "action_type": action_type,
-                "action_direction": action_direction,
+                "action_direction": direction,
                 "item_id": item_id,
+                "movement_type": movement_type,
             }
         )
 
@@ -297,8 +325,8 @@ def main():
             """
         INSERT INTO objects (
             name, map_id, object_type, x, y, local_x, local_y,
-            spriteset_id, sprite_name, text, action_type, action_direction, item_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            spriteset_id, sprite_name, text, action_type, action_direction, item_id, movement_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 obj.get("name"),
@@ -314,6 +342,7 @@ def main():
                 obj.get("action_type"),
                 obj.get("action_direction"),
                 obj.get("item_id"),
+                obj.get("movement_type"),
             ),
         )
 

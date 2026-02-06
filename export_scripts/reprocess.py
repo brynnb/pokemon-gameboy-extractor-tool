@@ -5,10 +5,12 @@ import sys
 
 scripts = [
     "export_map.py",
+    "export_warps.py",
     "update_zone_coordinates.py",
     "create_zones_and_tiles.py",
     "export_objects.py",
-    "update_object_coordinates.py"
+    "update_object_coordinates.py",
+    "generate_mysql_seed.py"
 ]
 
 def run_script(script_name):
