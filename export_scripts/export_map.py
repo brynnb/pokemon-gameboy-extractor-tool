@@ -751,8 +751,13 @@ def load_collision_data(conn):
             content = f.read()
 
         # Parse the collision data
+        # Note: Some labels share the same coll_tiles line, e.g.:
+        #   Mart_Coll::
+        #   Pokecenter_Coll::
+        #       coll_tiles $11, $1a, ...
+        # We track ALL pending labels and assign the coll_tiles data to each.
         collision_data = {}
-        current_coll = None
+        pending_labels = []
 
         # Split the file into lines
         lines = content.split("\n")
@@ -761,25 +766,31 @@ def load_collision_data(conn):
 
             # Check if this is a collision data label
             if line.endswith("_Coll::"):
-                current_coll = line.replace("::", "")
-                collision_data[current_coll] = []
+                label = line.replace("::", "")
+                collision_data[label] = []
+                pending_labels.append(label)
 
             # Check if this is a coll_tiles line
-            elif line.startswith("coll_tiles") and current_coll:
+            elif line.startswith("coll_tiles") and pending_labels:
                 # Extract the tile IDs
                 tile_ids_part = line.replace("coll_tiles", "").strip()
 
                 # Skip empty lines or lines with just a comment
                 if not tile_ids_part or tile_ids_part == ";":
+                    pending_labels = []
                     continue
 
                 # Extract the hex values
                 hex_values = re.findall(r"\$([0-9A-Fa-f]+)", tile_ids_part)
 
                 # Convert hex values to integers
-                for hex_val in hex_values:
-                    tile_id = int(hex_val, 16)
-                    collision_data[current_coll].append(tile_id)
+                tile_ids = [int(hex_val, 16) for hex_val in hex_values]
+
+                # Assign to ALL pending labels (handles shared labels)
+                for label in pending_labels:
+                    collision_data[label] = tile_ids
+
+                pending_labels = []
 
         # Insert the parsed collision data into the database
         for coll_name, tile_ids in collision_data.items():
@@ -809,8 +820,8 @@ def load_collision_data(conn):
 def is_block_walkable(block_index, tileset_id, conn):
     """Determine if a block is walkable based on the original Pokémon game's collision data.
 
-    In the original game, each tileset has a specific list of tile IDs that are considered
-    collision tiles (non-walkable). These are stored in the collision_tiles table.
+    In the original game, each tileset has a list of block indices (coll_tiles) that the
+    player CAN walk on. These are stored in the collision_tiles table.
 
     Args:
         block_index: The block index to check
@@ -833,17 +844,12 @@ def is_block_walkable(block_index, tileset_id, conn):
 
     count = cursor.fetchone()[0]
 
-    # If the block is in the collision_tiles table, it's not walkable
+    # If the block is in the collision_tiles table, it IS walkable
     if count > 0:
-        return False
+        return True
 
-    # For tilesets without specific collision data, use a reasonable default
-    # Higher block indices tend to be walls and obstacles
-    if count == 0 and block_index >= 30:
-        return False
-
-    # Default to walkable
-    return True
+    # Not in the walkable list — not walkable
+    return False
 
 
 def main():

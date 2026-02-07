@@ -448,16 +448,16 @@ def populate_tiles(conn, block_pos_to_image_id):
             # Shared tileset mappings (from gfx/tilesets.asm)
             # Some maps use different tileset IDs but share the same blockset/graphics
             lookup_tileset_id = raw_tileset_id
-            
-            if raw_tileset_id == 5: # DOJO uses GYM (7)
+
+            if raw_tileset_id == 5:  # DOJO uses GYM (7)
                 lookup_tileset_id = 7
-            elif raw_tileset_id == 2: # MART uses POKECENTER (6)
+            elif raw_tileset_id == 2:  # MART uses POKECENTER (6)
                 lookup_tileset_id = 6
-            elif raw_tileset_id == 10: # MUSEUM uses GATE (12)
+            elif raw_tileset_id == 10:  # MUSEUM uses GATE (12)
                 lookup_tileset_id = 12
-            elif raw_tileset_id == 9: # FOREST_GATE uses GATE (12)
+            elif raw_tileset_id == 9:  # FOREST_GATE uses GATE (12)
                 lookup_tileset_id = 12
-            elif raw_tileset_id == 4: # REDS_HOUSE_2 uses REDS_HOUSE (1)
+            elif raw_tileset_id == 4:  # REDS_HOUSE_2 uses REDS_HOUSE (1)
                 lookup_tileset_id = 1
 
             # Get the block data to check individual tiles
@@ -501,44 +501,61 @@ def populate_tiles(conn, block_pos_to_image_id):
 
                 # Determine collision type for THIS 16x16 tile (2x2 8x8 tiles)
                 # 0: Solid, 1: Land, 2: Water
-                # A tile is Water if ANY of its sub-tiles are water ID ($14 = 20)
-                # A tile is Land if ALL its non-water sub-tiles are in the walkable list
+                #
+                # In the original Game Boy Pokémon engine, collision is checked per
+                # 16x16 "step" position by looking at the 8x8 tile at the player's
+                # feet — the bottom-left tile of each 2x2 step area. The coll_tiles
+                # list (stored in collision_tiles table) contains the 8x8 tile IDs
+                # that ARE walkable/passable.
+                #
+                # Block layout (4x4 of 8x8 tiles, indices 0-15):
+                #   [0]  [1]  [2]  [3]
+                #   [4]  [5]  [6]  [7]
+                #   [8]  [9]  [10] [11]
+                #   [12] [13] [14] [15]
+                #
+                # Each 16x16 step position's bottom-left 8x8 tile index:
+                #   Pos 0 (TL): index 4
+                #   Pos 1 (TR): index 6
+                #   Pos 2 (BL): index 12
+                #   Pos 3 (BR): index 14
                 collision_type = 0
-                is_tile_walkable = 0 # Legacy flag
-                
-                if has_collision_tiles:
-                    # Phaser tile position mapping (each is 2x2 tiles):
-                    # 0: TL (0,1,4,5), 1: TR (2,3,6,7), 2: BL (8,9,12,13), 3: BR (10,11,14,15)
-                    tile_sub_indices = []
-                    if position == 0: tile_sub_indices = [0, 1, 4, 5]
-                    elif position == 1: tile_sub_indices = [2, 3, 6, 7]
-                    elif position == 2: tile_sub_indices = [8, 9, 12, 13]
-                    elif position == 3: tile_sub_indices = [10, 11, 14, 15]
+                is_tile_walkable = 0
 
-                    raw_tile_ids = []
-                    for sub_idx in tile_sub_indices:
-                        if sub_idx < len(block_data):
-                            raw_tile_ids.append(block_data[sub_idx])
-                    
-                    # Check for Water ($14, $48)
-                    if any(tid == 0x14 or tid == 0x48 for tid in raw_tile_ids):
-                        collision_type = 2
-                        is_tile_walkable = 0 # Still not "walkable" by default land rules
-                    else:
-                        # Check if all are in walkable list (Land)
-                        is_all_walkable = True
-                        for t_id in raw_tile_ids:
-                            cursor.execute(
-                                "SELECT COUNT(*) FROM collision_tiles WHERE tileset_id = ? AND tile_id = ?",
-                                (raw_tileset_id, t_id),
-                            )
-                            if cursor.fetchone()[0] == 0:
-                                is_all_walkable = False
-                                break
-                        
-                        if is_all_walkable:
-                            collision_type = 1
-                            is_tile_walkable = 1
+                # Get the bottom-left 8x8 sub-tile for this position
+                bl_sub_indices = {0: 4, 1: 6, 2: 12, 3: 14}
+                bl_idx = bl_sub_indices[position]
+
+                # Also gather all 4 sub-tiles for water detection
+                tile_sub_indices = []
+                if position == 0:
+                    tile_sub_indices = [0, 1, 4, 5]
+                elif position == 1:
+                    tile_sub_indices = [2, 3, 6, 7]
+                elif position == 2:
+                    tile_sub_indices = [8, 9, 12, 13]
+                elif position == 3:
+                    tile_sub_indices = [10, 11, 14, 15]
+
+                raw_tile_ids = []
+                for sub_idx in tile_sub_indices:
+                    if sub_idx < len(block_data):
+                        raw_tile_ids.append(block_data[sub_idx])
+
+                # Check for Water ($14, $48)
+                if any(tid == 0x14 or tid == 0x48 for tid in raw_tile_ids):
+                    collision_type = 2
+                    is_tile_walkable = 0
+                elif has_collision_tiles and bl_idx < len(block_data):
+                    # Check if the bottom-left 8x8 tile is in the walkable list
+                    bl_tile_id = block_data[bl_idx]
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM collision_tiles WHERE tileset_id = ? AND tile_id = ?",
+                        (raw_tileset_id, bl_tile_id),
+                    )
+                    if cursor.fetchone()[0] > 0:
+                        collision_type = 1
+                        is_tile_walkable = 1
 
                 # Add to map tiles
                 map_tiles.append(
