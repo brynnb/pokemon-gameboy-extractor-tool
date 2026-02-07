@@ -382,16 +382,20 @@ def main():
         else:
             sprites_count += 1
 
-    # Commit changes and close connection
+    # Commit changes
     conn.commit()
-    conn.close()
 
     print(
         f"Successfully exported {len(all_objects)} objects to pokemon.db ({signs_count} signs, {sprites_count} sprites)"
     )
-    print(
-        "Note: Run update_object_coordinates.py to update global coordinates (x, y) based on local coordinates (local_x, local_y)"
-    )
+
+    # Auto-apply global coordinate offsets so x/y are never left NULL
+    from update_object_coordinates import update_object_coordinates
+
+    updated = update_object_coordinates(conn)
+    print(f"Auto-applied global coordinates to {updated} objects")
+
+    conn.close()
 
 
 if __name__ == "__main__":
