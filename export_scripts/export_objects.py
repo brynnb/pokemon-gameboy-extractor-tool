@@ -45,6 +45,8 @@ def create_database():
         action_direction TEXT,
         item_id INTEGER,
         movement_type TEXT DEFAULT 'LAND',
+        trainer_class TEXT,
+        trainer_party_index INTEGER,
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (item_id) REFERENCES items (id)
     )
@@ -128,7 +130,19 @@ def parse_bg_events(content, map_name):
         # Determine if we should show a sprite for this sign
         # Building signs and informational signposts are already visible in the background tiles
         sprite_name = "SPRITE_SIGN"
-        if any(keyword in text_id for keyword in ["MART_SIGN", "POKECENTER_SIGN", "GYM_SIGN", "TRAINER_TIPS", "CITY_SIGN", "TOWN_SIGN", "ACADEMY_SIGN", "POKEDEX_FAN_CLUB_SIGN"]):
+        if any(
+            keyword in text_id
+            for keyword in [
+                "MART_SIGN",
+                "POKECENTER_SIGN",
+                "GYM_SIGN",
+                "TRAINER_TIPS",
+                "CITY_SIGN",
+                "TOWN_SIGN",
+                "ACADEMY_SIGN",
+                "POKEDEX_FAN_CLUB_SIGN",
+            ]
+        ):
             sprite_name = None
         # Also generally hide things just named "_SIGN" since they are tiles
         elif text_id.endswith("_SIGN"):
@@ -216,12 +230,19 @@ def parse_object_events(content, map_name, cursor):
             match.group(8) if len(match.groups()) >= 8 and match.group(8) else None
         )
 
-        # Determine if this is an item or NPC based on sprite and parameters
+        # Determine if this is an item, trainer, or regular NPC
         object_type = OBJECT_TYPE_OBJECT
         item_id = None
+        trainer_class = None
+        trainer_party_index = None
 
+        # Check if this is a trainer NPC (OPP_ prefix in the 7th parameter)
+        if item_or_trainer and item_or_trainer.startswith("OPP_"):
+            trainer_class = item_or_trainer[4:]  # Strip OPP_ prefix
+            if trainer_level and trainer_level.isdigit():
+                trainer_party_index = int(trainer_level)
         # If it's a Poké Ball sprite, it's likely an item
-        if sprite == "SPRITE_POKE_BALL" and item_or_trainer:
+        elif sprite == "SPRITE_POKE_BALL" and item_or_trainer:
             object_type = OBJECT_TYPE_ITEM
             # Look up the item ID from the items table using the constant name
             item_id = items.get(item_or_trainer)
@@ -240,11 +261,16 @@ def parse_object_events(content, map_name, cursor):
                 item_id = int(item_match.group(1))
 
         # Determine movement type based on sprite
-        movement_type = 'LAND'
-        if sprite in ["SPRITE_SEEL", "SPRITE_LAPRAS", "SPRITE_SWIMMER", "SPRITE_WATER_NPC"]:
-            movement_type = 'WATER'
-        elif sprite == "SPRITE_PLAYER": # Players can do both (eventually)
-            movement_type = 'BOTH'
+        movement_type = "LAND"
+        if sprite in [
+            "SPRITE_SEEL",
+            "SPRITE_LAPRAS",
+            "SPRITE_SWIMMER",
+            "SPRITE_WATER_NPC",
+        ]:
+            movement_type = "WATER"
+        elif sprite == "SPRITE_PLAYER":  # Players can do both (eventually)
+            movement_type = "BOTH"
 
         # Normalize direction
         direction = action_direction
@@ -266,6 +292,8 @@ def parse_object_events(content, map_name, cursor):
                 "action_direction": direction,
                 "item_id": item_id,
                 "movement_type": movement_type,
+                "trainer_class": trainer_class,
+                "trainer_party_index": trainer_party_index,
             }
         )
 
@@ -325,8 +353,9 @@ def main():
             """
         INSERT INTO objects (
             name, map_id, object_type, x, y, local_x, local_y,
-            spriteset_id, sprite_name, text, action_type, action_direction, item_id, movement_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            spriteset_id, sprite_name, text, action_type, action_direction, item_id, movement_type,
+            trainer_class, trainer_party_index
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 obj.get("name"),
@@ -343,6 +372,8 @@ def main():
                 obj.get("action_direction"),
                 obj.get("item_id"),
                 obj.get("movement_type"),
+                obj.get("trainer_class"),
+                obj.get("trainer_party_index"),
             ),
         )
 
