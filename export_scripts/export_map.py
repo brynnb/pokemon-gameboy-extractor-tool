@@ -165,7 +165,6 @@ def create_database():
         block_index INTEGER NOT NULL,
         tileset_id INTEGER NOT NULL,
         is_overworld INTEGER NOT NULL DEFAULT 0,
-        is_walkable INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
@@ -817,41 +816,6 @@ def load_collision_data(conn):
     return conn
 
 
-def is_block_walkable(block_index, tileset_id, conn):
-    """Determine if a block is walkable based on the original Pokémon game's collision data.
-
-    In the original game, each tileset has a list of block indices (coll_tiles) that the
-    player CAN walk on. These are stored in the collision_tiles table.
-
-    Args:
-        block_index: The block index to check
-        tileset_id: The tileset ID
-        conn: Database connection
-
-    Returns:
-        bool: True if the block is walkable, False otherwise
-    """
-    cursor = conn.cursor()
-
-    # Check if the block_index is in the collision_tiles table for this tileset
-    cursor.execute(
-        """
-        SELECT COUNT(*) FROM collision_tiles 
-        WHERE tileset_id = ? AND tile_id = ?
-        """,
-        (tileset_id, block_index),
-    )
-
-    count = cursor.fetchone()[0]
-
-    # If the block is in the collision_tiles table, it IS walkable
-    if count > 0:
-        return True
-
-    # Not in the walkable list — not walkable
-    return False
-
-
 def main():
     # Ensure 2bpp files exist
     ensure_2bpp_files_exist()
@@ -1112,14 +1076,11 @@ def main():
                 if block_pos < len(blk_bytes):
                     block_index = blk_bytes[block_pos]
 
-                    # Determine if the block is walkable using the database
-                    is_walkable = is_block_walkable(block_index, tileset_id, db_conn)
-
                     # Insert into tiles_raw table
                     cursor.execute(
                         """
-                        INSERT INTO tiles_raw (map_id, x, y, block_index, tileset_id, is_overworld, is_walkable)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO tiles_raw (map_id, x, y, block_index, tileset_id, is_overworld)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
                             map_id,
@@ -1128,7 +1089,6 @@ def main():
                             block_index,
                             tileset_id,
                             1 if is_overworld else 0,
-                            1 if is_walkable else 0,
                         ),
                     )
                     tiles_raw_count += 1

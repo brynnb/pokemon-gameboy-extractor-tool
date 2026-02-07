@@ -53,7 +53,6 @@ def create_new_tables():
         map_id INTEGER NOT NULL,
         tile_image_id INTEGER NOT NULL,
         is_overworld INTEGER NOT NULL DEFAULT 0,
-        is_walkable INTEGER NOT NULL DEFAULT 1,
         collision_type INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (tile_image_id) REFERENCES tile_images (id)
@@ -421,7 +420,7 @@ def populate_tiles(conn, block_pos_to_image_id):
         # Get raw tile data for this map from tiles_raw table
         cursor.execute(
             """
-        SELECT x, y, block_index, tileset_id, is_overworld, is_walkable
+        SELECT x, y, block_index, tileset_id, is_overworld
         FROM tiles_raw
         WHERE map_id = ?
         """,
@@ -443,7 +442,6 @@ def populate_tiles(conn, block_pos_to_image_id):
             block_index,
             raw_tileset_id,
             raw_is_overworld,
-            raw_is_walkable,
         ) in raw_tiles:
             # Shared tileset mappings (from gfx/tilesets.asm)
             # Some maps use different tileset IDs but share the same blockset/graphics
@@ -520,7 +518,6 @@ def populate_tiles(conn, block_pos_to_image_id):
                 #   Pos 2 (BL): index 12
                 #   Pos 3 (BR): index 14
                 collision_type = 0
-                is_tile_walkable = 0
 
                 # Get the bottom-left 8x8 sub-tile for this position
                 bl_sub_indices = {0: 4, 1: 6, 2: 12, 3: 14}
@@ -545,7 +542,6 @@ def populate_tiles(conn, block_pos_to_image_id):
                 # Check for Water ($14, $48)
                 if any(tid == 0x14 or tid == 0x48 for tid in raw_tile_ids):
                     collision_type = 2
-                    is_tile_walkable = 0
                 elif has_collision_tiles and bl_idx < len(block_data):
                     # Check if the bottom-left 8x8 tile is in the walkable list
                     bl_tile_id = block_data[bl_idx]
@@ -555,7 +551,6 @@ def populate_tiles(conn, block_pos_to_image_id):
                     )
                     if cursor.fetchone()[0] > 0:
                         collision_type = 1
-                        is_tile_walkable = 1
 
                 # Add to map tiles
                 map_tiles.append(
@@ -567,7 +562,6 @@ def populate_tiles(conn, block_pos_to_image_id):
                         map_id,
                         tile_image_id,
                         is_overworld,
-                        is_tile_walkable,
                         collision_type,
                     )
                 )
@@ -583,8 +577,8 @@ def populate_tiles(conn, block_pos_to_image_id):
         if len(tiles_data) >= BATCH_SIZE:
             cursor.executemany(
                 """
-            INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, is_walkable, collision_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, collision_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 tiles_data,
             )
@@ -595,8 +589,8 @@ def populate_tiles(conn, block_pos_to_image_id):
     if tiles_data:
         cursor.executemany(
             """
-        INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, is_walkable, collision_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, collision_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
             tiles_data,
         )
