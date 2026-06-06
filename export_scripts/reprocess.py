@@ -3,7 +3,8 @@
 Full reprocessing pipeline for Pokémon game data extraction.
 
 This script runs all export steps in the correct order, then copies the
-resulting SQLite database to the CaptureQuest project and imports it into MySQL.
+resulting SQLite database to the CaptureQuest project and optionally runs the
+CaptureQuest SQLite-to-Postgres importer.
 
 Pipeline order matters! Key dependencies:
   1. export_map.py              - Extracts maps, tilesets, blocksets, collision data, tiles_raw
@@ -25,11 +26,9 @@ Pipeline order matters! Key dependencies:
  13. export_trainers.py         - Trainer classes, parties, party Pokémon
  14. export_hidden_objects.py   - Hidden items, coins, objects, map music
  15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
- 16. generate_mysql_seed.py     - Generates a SQL seed file (optional, for non-Go imports)
-
 After the Python scripts, this also:
- 17. Copies pokemon.db to the CaptureQuest public folder
- 18. Runs the Go import-phaser tool to sync SQLite → MySQL
+ 16. Copies pokemon.db to the CaptureQuest public folder
+ 17. Runs the Go import-phaser tool to sync SQLite -> Postgres
 """
 import subprocess
 import os
@@ -39,10 +38,16 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Sibling repo path (adjust if your layout differs)
-CAPTURE_QUEST_ROOT = PROJECT_ROOT.parent / "capture-quest"
+CAPTURE_QUEST_ROOT = Path(
+    os.environ.get("CAPTURE_QUEST_ROOT", PROJECT_ROOT.parent / "capture-quest")
+)
 CAPTURE_QUEST_DB_DEST = CAPTURE_QUEST_ROOT / "public" / "phaser" / "pokemon.db"
 CAPTURE_QUEST_SERVER_DIR = CAPTURE_QUEST_ROOT / "server"
+RUN_CAPTUREQUEST_IMPORT = os.environ.get("RUN_CAPTUREQUEST_IMPORT", "1") not in {
+    "0",
+    "false",
+    "False",
+}
 
 scripts = [
     # Map infrastructure (order-dependent)
@@ -62,8 +67,6 @@ scripts = [
     "export_trainers.py",
     "export_hidden_objects.py",
     "export_map_scripts.py",
-    # Seed generation (must be last)
-    "generate_mysql_seed.py",
 ]
 
 
@@ -87,7 +90,7 @@ def copy_db():
         print(
             f"!!! CaptureQuest phaser directory not found: {CAPTURE_QUEST_DB_DEST.parent}"
         )
-        print("    Skipping DB copy and MySQL import.")
+        print("    Skipping DB copy and CaptureQuest import.")
         return False
     print(f"\n{'='*60}")
     print(f">>> Copying pokemon.db to CaptureQuest...")
@@ -97,19 +100,22 @@ def copy_db():
     return True
 
 
-def run_mysql_import():
+def run_capturequest_import():
+    if not RUN_CAPTUREQUEST_IMPORT:
+        print(">>> RUN_CAPTUREQUEST_IMPORT=0; skipping CaptureQuest import.")
+        return
     if not CAPTURE_QUEST_SERVER_DIR.exists():
         print(
             f"!!! CaptureQuest server directory not found: {CAPTURE_QUEST_SERVER_DIR}"
         )
-        print("    Skipping MySQL import.")
+        print("    Skipping CaptureQuest import.")
         return
     print(f"\n{'='*60}")
-    print(f">>> Importing into MySQL (go run ./cmd/import-phaser)...")
+    print(f">>> Importing into CaptureQuest Postgres (go run ./cmd/import-phaser)...")
     print(f"{'='*60}")
     try:
         subprocess.run(
-            ["go", "run", "./cmd/import-phaser"],
+            ["go", "run", "./cmd/import-phaser", str(CAPTURE_QUEST_DB_DEST)],
             cwd=str(CAPTURE_QUEST_SERVER_DIR),
             check=True,
         )
@@ -117,8 +123,11 @@ def run_mysql_import():
         print(f"!!! Error running import-phaser: {e}")
         sys.exit(1)
     except FileNotFoundError:
-        print("!!! 'go' command not found. Skipping MySQL import.")
-        print("    Run manually: cd server && go run ./cmd/import-phaser")
+        print("!!! 'go' command not found. Skipping CaptureQuest import.")
+        print(
+            "    Run manually: cd capture-quest/server && "
+            "go run ./cmd/import-phaser ../public/phaser/pokemon.db"
+        )
 
 
 def main():
@@ -129,9 +138,9 @@ def main():
     for script in scripts:
         run_script(script)
 
-    # Copy DB and import into MySQL
+    # Copy DB and import into CaptureQuest.
     if copy_db():
-        run_mysql_import()
+        run_capturequest_import()
 
     print(f"\n{'='*60}")
     print("✅ All reprocessing steps completed successfully!")

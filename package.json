@@ -1,10 +1,10 @@
 {
-    "name": "pokemon-online",
+    "name": "pokemon-gameboy-extractor-tool",
     "version": "1.0.0",
-    "description": "Pokemon Online Game with Phaser",
+    "description": "Pokemon Red/Blue data extractor and lightweight Phaser viewer",
     "main": "server/server.js",
     "scripts": {
-        "export": "node export_scripts/export.js",
+        "export": "python3 export_scripts/reprocess.py",
         "start": "node server/server.js",
         "dev": "nodemon server/server.js",
         "client": "cd pokemon-phaser && npm run dev",

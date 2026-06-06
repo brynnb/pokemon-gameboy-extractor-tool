@@ -1,83 +1,96 @@
-# Pokémon Extractor & Viewer
+# Pokemon Game Boy Extractor Tool
 
-![pokeonline](https://github.com/user-attachments/assets/e4602729-29bb-4ee4-94f6-446c90dd2a89)
+This repo extracts Pokemon Red/Blue data from the `pokered` disassembly into a
+SQLite database (`pokemon.db`) and provides a lightweight Phaser viewer for
+inspection. CaptureQuest consumes the generated SQLite artifact through its Go
+importer and writes runtime data to Postgres.
 
-This project extracts game data and graphics from the original Pokemon Red/Blue GameBoy game, puts them in a relational database, has a lightweight server to stream tile data to a renderer, and renders it in a browser. The server bit is overcomplicating a simple renderer, but I wanted it as a small proof of concept for an MMO built with this data and Phaser, which I'm working on in a different repo. 
+The extractor does not distribute ROM data. It reads source/data files from the
+`pokemon-game-data` submodule.
 
-This project uses python scripts, node.js for the server to stream tiles to a renderer, and [Phaser](https://phaser.io/) for the browser-based engine.
-
-This project does not meaningfully distribute any copywritten material. It pulls in the disassembled code and data from the [pokered](https://github.com/pret/pokered) repo and builds database and sprites and graphics from that.
-
-
-## Installation
-
-### Cloning the Repository
+## Setup
 
 ```bash
-# Clone with submodules (recommended)
-git clone https://github.com/brynnb/pokemon-online.git --recurse-submodules
+git clone https://github.com/brynnb/pokemon-gameboy-extractor-tool.git --recurse-submodules
+cd pokemon-gameboy-extractor-tool
+npm install
+```
 
-# OR clone normally and then initialize submodules
-git clone https://github.com/brynnb/pokemon-online.git
-cd pokemon-online
+If the submodule is missing:
+
+```bash
 git submodule update --init --recursive
 ```
 
-### Installing Dependencies
+Install RGBDS so `rgbgfx` is available for tileset conversion:
 
 ```bash
-npm install
+# macOS
+brew install rgbds
+
+# Ubuntu/Debian
+sudo apt-get install rgbds
+```
+
+## Full Export Pipeline
+
+Run the canonical pipeline:
+
+```bash
 npm run export
 ```
 
-## Usage
+This runs `export_scripts/reprocess.py`, which:
 
-### Running the Client (Vite Development Server)
+1. Rebuilds `pokemon.db` from the source data in the correct order.
+2. Copies it to `../capture-quest/public/phaser/pokemon.db` when that sibling
+   repo exists.
+3. Runs CaptureQuest's `server/cmd/import-phaser` importer so the copied SQLite
+   artifact syncs into Postgres.
 
-```bash
-cd pokemon-phaser
-npm install
-npm run dev
-```
-
-This will start the Vite development server for the client on port 8080.
-
-### Building the Client (Production)
-
-If you want to build the client for production:
+Useful environment overrides:
 
 ```bash
-cd pokemon-phaser
-npm run build
+# Point at a non-sibling CaptureQuest checkout
+CAPTURE_QUEST_ROOT=/path/to/capture-quest npm run export
+
+# Rebuild pokemon.db but skip the CaptureQuest import
+RUN_CAPTUREQUEST_IMPORT=0 npm run export
 ```
 
-This will create a `dist` directory in the pokemon-phaser folder with the compiled assets.
+CaptureQuest's importer reads `DATABASE_URL` for Postgres when it is set.
 
-### Running the Server (Node.js)
+## Viewer
 
-In a separate terminal, run the server:
-
-```bash
-# From the project root
-npm run dev
-```
-
-This will start the Node.js server on port 3000.
-
-### Running Both with a Single Command
-
-Alternatively, you can run both the client and server with a single command:
+The Node/Phaser viewer is useful for inspecting extracted tiles and maps:
 
 ```bash
 npm run start:all
 ```
 
-### Troubleshooting
-
-If you encounter a "webfontloader" dependency error when building the client:
+Or run the pieces separately:
 
 ```bash
-cd pokemon-phaser
-npm install webfontloader
-npm run build
+npm run dev
+cd pokemon-phaser && npm run dev
+```
+
+## Important Files
+
+- `pokemon.db`: generated SQLite source artifact.
+- `export_scripts/reprocess.py`: canonical full pipeline.
+- `export_scripts/*.py`: individual extractors for maps, tiles, objects,
+  warps, text, Pokemon, moves, items, trainers, encounters, hidden objects, and
+  scripts.
+- `GAME_DATA_REFERENCE.md`: table reference and engine notes.
+- `pokemon-game-data/`: source data submodule.
+
+## Validation
+
+For code changes, run syntax checks on touched Python files and rerun the
+smallest relevant extractor. For pipeline changes, run:
+
+```bash
+RUN_CAPTUREQUEST_IMPORT=0 npm run export
+sqlite3 pokemon.db ".tables"
 ```

@@ -2,7 +2,7 @@
 """Classify warps as 'door' (immediate) or 'carpet' (directional) based on
 the original Game Boy tile data.
 
-Outputs a SQL migration for the capture-quest MySQL database.
+Outputs a Postgres-compatible SQL migration for CaptureQuest.
 
 Classification logic (from home/overworld.asm CheckWarpsNoCollision):
 1. Player steps onto a warp tile position
@@ -22,10 +22,10 @@ on the map:
 
 import sqlite3
 import sys
+from pathlib import Path
 
-DB_PATH = (
-    "/Users/brynnbateman/Documents/GitHub/pokemon-gameboy-extractor-tool/pokemon.db"
-)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = PROJECT_ROOT / "pokemon.db"
 
 # From data/tilesets/door_tile_ids.asm
 # 8x8 tile IDs at player's feet that count as "door" tiles per tileset
@@ -183,8 +183,26 @@ def infer_carpet_direction_from_dest(
 
 
 def main():
+    if not DB_PATH.exists():
+        print(f"ERROR: {DB_PATH} not found. Run npm run export first.", file=sys.stderr)
+        sys.exit(1)
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    required_tables = {"maps", "tiles_raw", "warp_events"}
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    existing_tables = {row[0] for row in cursor.fetchall()}
+    missing_tables = sorted(required_tables - existing_tables)
+    if missing_tables:
+        print(
+            "ERROR: pokemon.db is missing required tables: "
+            + ", ".join(missing_tables),
+            file=sys.stderr,
+        )
+        print("Run npm run export to rebuild the full SQLite artifact.", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
 
     # Cache destination map info for dest_warp_index resolution
     map_info_cache = {}
@@ -360,10 +378,10 @@ def main():
     print("--                 NULL for door warps")
     print("")
     print(
-        "ALTER TABLE phaser_warps ADD COLUMN warp_type VARCHAR(10) NOT NULL DEFAULT 'door';"
+        "ALTER TABLE phaser_warps ADD COLUMN IF NOT EXISTS warp_type VARCHAR(10) NOT NULL DEFAULT 'door';"
     )
     print(
-        "ALTER TABLE phaser_warps ADD COLUMN warp_direction VARCHAR(10) DEFAULT NULL;"
+        "ALTER TABLE phaser_warps ADD COLUMN IF NOT EXISTS warp_direction VARCHAR(10) DEFAULT NULL;"
     )
     print("")
 
@@ -393,12 +411,13 @@ def main():
         print("-- Overworld carpet warps (need global coord lookup via phaser_tiles)")
         for r in overworld_carpets:
             print(
-                f"UPDATE phaser_warps pw "
-                f"JOIN phaser_tiles t ON t.x = pw.x AND t.y = pw.y "
+                "UPDATE phaser_warps pw "
+                f"SET warp_type = 'carpet', warp_direction = '{r['direction']}' "
+                "FROM phaser_tiles t "
+                "WHERE t.x = pw.x AND t.y = pw.y "
                 f"AND t.map_id = {r['map_id']} "
                 f"AND t.local_x = {r['x']} AND t.local_y = {r['y']} "
-                f"SET pw.warp_type = 'carpet', pw.warp_direction = '{r['direction']}' "
-                f"WHERE pw.source_map_id = 9999;"
+                "AND pw.source_map_id = 9999;"
             )
 
     conn.close()
