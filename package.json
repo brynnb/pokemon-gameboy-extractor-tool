@@ -4,6 +4,7 @@
     "description": "Pokemon Red/Blue data extractor and lightweight Phaser viewer",
     "main": "server/server.js",
     "scripts": {
+        "generate": "./scripts/generate.sh",
         "export": "python3 export_scripts/reprocess.py",
         "start": "node server/server.js",
         "dev": "nodemon server/server.js",

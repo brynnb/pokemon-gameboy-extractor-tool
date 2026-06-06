@@ -2,9 +2,8 @@
 """
 Full reprocessing pipeline for Pokémon game data extraction.
 
-This script runs all export steps in the correct order, then copies the
-resulting SQLite database to the CaptureQuest project and optionally runs the
-CaptureQuest SQLite-to-Postgres importer.
+This script runs all export steps in the correct order and writes the generated
+SQLite artifact to pokemon.db in the repository root.
 
 Pipeline order matters! Key dependencies:
   1. export_map.py              - Extracts maps, tilesets, blocksets, collision data, tiles_raw
@@ -26,28 +25,13 @@ Pipeline order matters! Key dependencies:
  13. export_trainers.py         - Trainer classes, parties, party Pokémon
  14. export_hidden_objects.py   - Hidden items, coins, objects, map music
  15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
-After the Python scripts, this also:
- 16. Copies pokemon.db to the CaptureQuest public folder
- 17. Runs the Go import-phaser tool to sync SQLite -> Postgres
 """
 import subprocess
 import os
 import sys
-import shutil
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-CAPTURE_QUEST_ROOT = Path(
-    os.environ.get("CAPTURE_QUEST_ROOT", PROJECT_ROOT.parent / "capture-quest")
-)
-CAPTURE_QUEST_DB_DEST = CAPTURE_QUEST_ROOT / "public" / "phaser" / "pokemon.db"
-CAPTURE_QUEST_SERVER_DIR = CAPTURE_QUEST_ROOT / "server"
-RUN_CAPTUREQUEST_IMPORT = os.environ.get("RUN_CAPTUREQUEST_IMPORT", "1") not in {
-    "0",
-    "false",
-    "False",
-}
 
 scripts = [
     # Map infrastructure (order-dependent)
@@ -81,55 +65,6 @@ def run_script(script_name):
         sys.exit(1)
 
 
-def copy_db():
-    src = PROJECT_ROOT / "pokemon.db"
-    if not src.exists():
-        print(f"!!! pokemon.db not found at {src}")
-        sys.exit(1)
-    if not CAPTURE_QUEST_DB_DEST.parent.exists():
-        print(
-            f"!!! CaptureQuest phaser directory not found: {CAPTURE_QUEST_DB_DEST.parent}"
-        )
-        print("    Skipping DB copy and CaptureQuest import.")
-        return False
-    print(f"\n{'='*60}")
-    print(f">>> Copying pokemon.db to CaptureQuest...")
-    print(f"{'='*60}")
-    shutil.copy2(src, CAPTURE_QUEST_DB_DEST)
-    print(f"    {src} → {CAPTURE_QUEST_DB_DEST}")
-    return True
-
-
-def run_capturequest_import():
-    if not RUN_CAPTUREQUEST_IMPORT:
-        print(">>> RUN_CAPTUREQUEST_IMPORT=0; skipping CaptureQuest import.")
-        return
-    if not CAPTURE_QUEST_SERVER_DIR.exists():
-        print(
-            f"!!! CaptureQuest server directory not found: {CAPTURE_QUEST_SERVER_DIR}"
-        )
-        print("    Skipping CaptureQuest import.")
-        return
-    print(f"\n{'='*60}")
-    print(f">>> Importing into CaptureQuest Postgres (go run ./cmd/import-phaser)...")
-    print(f"{'='*60}")
-    try:
-        subprocess.run(
-            ["go", "run", "./cmd/import-phaser", str(CAPTURE_QUEST_DB_DEST)],
-            cwd=str(CAPTURE_QUEST_SERVER_DIR),
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"!!! Error running import-phaser: {e}")
-        sys.exit(1)
-    except FileNotFoundError:
-        print("!!! 'go' command not found. Skipping CaptureQuest import.")
-        print(
-            "    Run manually: cd capture-quest/server && "
-            "go run ./cmd/import-phaser ../public/phaser/pokemon.db"
-        )
-
-
 def main():
     # Change to the script's directory so it can find the other scripts
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -138,14 +73,18 @@ def main():
     for script in scripts:
         run_script(script)
 
-    # Copy DB and import into CaptureQuest.
-    if copy_db():
-        run_capturequest_import()
+    db_path = PROJECT_ROOT / "pokemon.db"
+    if not db_path.exists():
+        print(f"!!! pokemon.db not found at {db_path}")
+        sys.exit(1)
+    if db_path.stat().st_size == 0:
+        print(f"!!! pokemon.db is empty at {db_path}")
+        sys.exit(1)
 
     print(f"\n{'='*60}")
     print("✅ All reprocessing steps completed successfully!")
     print(f"{'='*60}")
-    print("\nNote: Restart the CaptureQuest server to pick up the new data.")
+    print(f"\nOutput: {db_path}")
 
 
 if __name__ == "__main__":

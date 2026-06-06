@@ -2,7 +2,8 @@
 """Classify warps as 'door' (immediate) or 'carpet' (directional) based on
 the original Game Boy tile data.
 
-Outputs a Postgres-compatible SQL migration for CaptureQuest.
+Outputs Postgres-compatible SQL that downstream runtimes can use to seed warp
+activation metadata.
 
 Classification logic (from home/overworld.asm CheckWarpsNoCollision):
 1. Player steps onto a warp tile position

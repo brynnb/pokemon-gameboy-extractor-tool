@@ -5,7 +5,14 @@ These Python scripts extract Pokemon Red/Blue data from the
 
 ## Canonical Pipeline
 
-Run the full pipeline from the repo root:
+Run the full environment setup and pipeline from the repo root:
+
+```bash
+npm run generate
+```
+
+If dependencies and submodules are already ready, run just the extractor
+pipeline:
 
 ```bash
 npm run export
@@ -32,27 +39,6 @@ That invokes `reprocess.py`, which runs the scripts in this order:
 The order matters. Overworld offsets must exist before tile expansion, and
 object coordinates must be updated after objects are extracted.
 
-## CaptureQuest Handoff
-
-After rebuilding `pokemon.db`, `reprocess.py` copies it to:
-
-```text
-../capture-quest/public/phaser/pokemon.db
-```
-
-Then it runs CaptureQuest's Go importer:
-
-```bash
-cd ../capture-quest/server
-go run ./cmd/import-phaser ../public/phaser/pokemon.db
-```
-
-Use `RUN_CAPTUREQUEST_IMPORT=0 npm run export` to skip the import, or set
-`CAPTURE_QUEST_ROOT=/path/to/capture-quest` if the checkout is not a sibling.
-
-CaptureQuest writes runtime/static data to Postgres; this repo remains the
-SQLite source artifact generator.
-
 ## Key Tables
 
 - `maps`, `tilesets`, `tiles_raw`, `tiles`, `tile_images`
@@ -66,7 +52,7 @@ SQLite source artifact generator.
 - `map_music`, `map_scripts`, `npc_movement_data`, `event_flags`,
   `coordinate_triggers`
 
-## Notes From CaptureQuest Integration
+## Runtime Integration Notes
 
 - Trainer sight range comes from the second numeric argument in each map script's
   `trainer` macro and is exported as `trainer_headers.sight_range`.
@@ -75,8 +61,8 @@ SQLite source artifact generator.
 - Overworld maps are stitched with global coordinates, but local map coordinates
   remain important for scripts, trainer sight, object interaction, and warp
   resolution.
-- Scripted-event behavior belongs in CaptureQuest JSON files; extractor tables
-  should preserve original source facts rather than encode runtime policy.
+- Runtime behavior belongs in the downstream game or tool; extractor tables
+  should preserve original source facts rather than encode app-specific policy.
 
 ## Troubleshooting
 

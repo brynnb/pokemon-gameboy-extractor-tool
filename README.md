@@ -2,8 +2,9 @@
 
 This repo extracts Pokemon Red/Blue data from the `pokered` disassembly into a
 SQLite database (`pokemon.db`) and provides a lightweight Phaser viewer for
-inspection. CaptureQuest consumes the generated SQLite artifact through its Go
-importer and writes runtime data to Postgres.
+inspection. The generated database is designed as a source artifact for games
+and tools that need canonical Pokemon Red/Blue maps, tiles, scripts, trainers,
+encounters, items, moves, and Pokemon data.
 
 The extractor does not distribute ROM data. It reads source/data files from the
 `pokemon-game-data` submodule.
@@ -34,7 +35,17 @@ sudo apt-get install rgbds
 
 ## Full Export Pipeline
 
-Run the canonical pipeline:
+For a fresh setup and full rebuild, run:
+
+```bash
+npm run generate
+```
+
+This command updates the `pokemon-game-data` submodule, creates a local
+Python virtual environment, installs extractor Python dependencies, and
+rebuilds `pokemon.db`.
+
+To run the raw canonical pipeline without the setup wrapper:
 
 ```bash
 npm run export
@@ -43,22 +54,8 @@ npm run export
 This runs `export_scripts/reprocess.py`, which:
 
 1. Rebuilds `pokemon.db` from the source data in the correct order.
-2. Copies it to `../capture-quest/public/phaser/pokemon.db` when that sibling
-   repo exists.
-3. Runs CaptureQuest's `server/cmd/import-phaser` importer so the copied SQLite
-   artifact syncs into Postgres.
-
-Useful environment overrides:
-
-```bash
-# Point at a non-sibling CaptureQuest checkout
-CAPTURE_QUEST_ROOT=/path/to/capture-quest npm run export
-
-# Rebuild pokemon.db but skip the CaptureQuest import
-RUN_CAPTUREQUEST_IMPORT=0 npm run export
-```
-
-CaptureQuest's importer reads `DATABASE_URL` for Postgres when it is set.
+2. Leaves the generated SQLite artifact at `./pokemon.db` for downstream apps
+   or importers to consume.
 
 ## Viewer
 
@@ -91,6 +88,6 @@ For code changes, run syntax checks on touched Python files and rerun the
 smallest relevant extractor. For pipeline changes, run:
 
 ```bash
-RUN_CAPTUREQUEST_IMPORT=0 npm run export
+npm run export
 sqlite3 pokemon.db ".tables"
 ```
