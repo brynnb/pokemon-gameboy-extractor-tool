@@ -6,12 +6,14 @@ Parses:
   - data/events/hidden_objects.asm for hidden interactable objects
   - data/events/hidden_item_coords.asm for hidden item locations
   - data/events/hidden_coins.asm for hidden coin locations
+  - data/maps/hide_show_data.asm + constants/hide_show_constants.asm for missable objects
   - data/maps/songs.asm for map music assignments
 
 Creates tables:
   - hidden_items: Hidden item pickup locations
   - hidden_coins: Hidden coin pickup locations  
   - hidden_objects: Hidden interactable objects (PCs, bookcases, gym statues, etc.)
+  - missable_objects: Source HS_* show/hide object state rows
   - map_music: Music assignment per map
 """
 import os
@@ -24,6 +26,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "pokemon.db"
 EVENTS_DIR = PROJECT_ROOT / "pokemon-game-data/data/events"
 MAPS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps"
+OBJECTS_DIR = MAPS_DIR / "objects"
+CONSTANTS_DIR = PROJECT_ROOT / "pokemon-game-data/constants"
 
 
 def create_tables(conn):
@@ -33,6 +37,7 @@ def create_tables(conn):
     cursor.execute("DROP TABLE IF EXISTS hidden_items")
     cursor.execute("DROP TABLE IF EXISTS hidden_coins")
     cursor.execute("DROP TABLE IF EXISTS hidden_objects")
+    cursor.execute("DROP TABLE IF EXISTS missable_objects")
     cursor.execute("DROP TABLE IF EXISTS map_music")
 
     cursor.execute("""
@@ -72,6 +77,24 @@ def create_tables(conn):
     """)
 
     cursor.execute("""
+    CREATE TABLE missable_objects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hs_index INTEGER NOT NULL,
+        hs_constant TEXT NOT NULL UNIQUE,
+        map_constant TEXT NOT NULL,
+        map_id INTEGER,
+        object_constant TEXT NOT NULL,
+        object_index INTEGER,
+        object_name TEXT,
+        object_type TEXT,
+        initial_state TEXT NOT NULL,
+        initial_visible INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
+    )
+    """)
+
+    cursor.execute("""
     CREATE TABLE map_music (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_constant TEXT NOT NULL,
@@ -89,6 +112,140 @@ def load_map_ids(cursor):
     """Load map name -> ID mapping from the maps table."""
     cursor.execute("SELECT id, name FROM maps")
     return {name: id for id, name in cursor.fetchall()}
+
+
+def upper_snake_to_camel(value):
+    special = {
+        "SS": "SS",
+        "TM": "TM",
+        "HM": "HM",
+        "PC": "PC",
+    }
+    parts = value.split("_")
+    converted = []
+    for part in parts:
+        if part in special:
+            converted.append(special[part])
+        elif re.fullmatch(r"B?\d+F", part):
+            converted.append(part)
+        else:
+            converted.append(part[:1] + part[1:].lower())
+    return "".join(converted)
+
+
+def parse_map_object_constants():
+    constants = {}
+    for object_path in OBJECTS_DIR.glob("*.asm"):
+        map_name = object_path.stem
+        object_constants = {}
+        index = 1
+        in_constants = False
+        for raw_line in object_path.read_text().splitlines():
+            stripped = raw_line.strip()
+            if stripped == "object_const_def":
+                in_constants = True
+                index = 1
+                continue
+            if not in_constants:
+                continue
+            match = re.match(r"const_export\s+([A-Z0-9_]+)", stripped)
+            if match:
+                object_constants[match.group(1)] = index
+                index += 1
+                continue
+            if stripped and not stripped.startswith(";"):
+                break
+        constants[map_name] = object_constants
+    return constants
+
+
+def object_info_for_index(cursor, map_id, map_name, object_index):
+    if map_id is None or object_index is None:
+        return None, None
+    expected_name = f"{map_name}_NPC_{object_index}"
+    cursor.execute(
+        "SELECT name, object_type FROM objects WHERE map_id = ? AND name = ?",
+        (map_id, expected_name),
+    )
+    row = cursor.fetchone()
+    if row:
+        return row[0], row[1]
+    cursor.execute(
+        "SELECT name, object_type FROM objects WHERE map_id = ? ORDER BY id LIMIT 1 OFFSET ?",
+        (map_id, object_index - 1),
+    )
+    row = cursor.fetchone()
+    if row:
+        return row[0], row[1]
+    return expected_name, None
+
+
+def parse_hide_show_constants():
+    constants = []
+    file_path = CONSTANTS_DIR / "hide_show_constants.asm"
+    in_constants = False
+    for raw_line in file_path.read_text().splitlines():
+        stripped = raw_line.strip()
+        if stripped == "const_def":
+            in_constants = True
+            continue
+        if not in_constants:
+            continue
+        match = re.match(r"const\s+(HS_[A-Z0-9_]+)", stripped)
+        if match:
+            constants.append(match.group(1))
+            continue
+        if stripped and not stripped.startswith(";") and not stripped.startswith("const"):
+            break
+    return constants
+
+
+def parse_hide_show_rows():
+    rows = []
+    file_path = MAPS_DIR / "hide_show_data.asm"
+    for raw_line in file_path.read_text().splitlines():
+        stripped = raw_line.strip()
+        match = re.match(r"db\s+([A-Z0-9_]+),\s+([A-Z0-9_]+),\s+(SHOW|HIDE)", stripped)
+        if match:
+            rows.append(
+                {
+                    "map_constant": match.group(1),
+                    "object_constant": match.group(2),
+                    "initial_state": match.group(3),
+                }
+            )
+    return rows
+
+
+def parse_missable_objects(cursor, map_ids):
+    hs_constants = parse_hide_show_constants()
+    hide_show_rows = parse_hide_show_rows()
+    object_constants_by_map = parse_map_object_constants()
+    missables = []
+    for hs_index, (hs_constant, row) in enumerate(zip(hs_constants, hide_show_rows)):
+        map_constant = row["map_constant"]
+        map_id = map_ids.get(map_constant)
+        map_name = upper_snake_to_camel(map_constant)
+        object_constant = row["object_constant"]
+        object_index = object_constants_by_map.get(map_name, {}).get(object_constant)
+        object_name, object_type = object_info_for_index(cursor, map_id, map_name, object_index)
+        initial_state = row["initial_state"]
+        missables.append(
+            {
+                "hs_index": hs_index,
+                "hs_constant": hs_constant,
+                "map_constant": map_constant,
+                "map_id": map_id,
+                "object_constant": object_constant,
+                "object_index": object_index,
+                "object_name": object_name,
+                "object_type": object_type,
+                "initial_state": initial_state,
+                "initial_visible": 1 if initial_state == "SHOW" else 0,
+                "label": f"SourceMissableInitial:{hs_constant}",
+            }
+        )
+    return missables
 
 
 def parse_hidden_items(map_ids):
@@ -294,9 +451,36 @@ def main():
     print(f"  Extracted {len(hidden_objects)} hidden objects")
 
     # =========================================================================
-    # Phase 4: Map music
+    # Phase 4: Missable objects
     # =========================================================================
-    print("\nPhase 4: Extracting map music...")
+    print("\nPhase 4: Extracting missable objects...")
+    missable_objects = parse_missable_objects(cursor, map_ids)
+    for obj in missable_objects:
+        cursor.execute(
+            """INSERT INTO missable_objects
+               (hs_index, hs_constant, map_constant, map_id, object_constant,
+                object_index, object_name, object_type, initial_state, initial_visible, label)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                obj["hs_index"],
+                obj["hs_constant"],
+                obj["map_constant"],
+                obj["map_id"],
+                obj["object_constant"],
+                obj["object_index"],
+                obj["object_name"],
+                obj["object_type"],
+                obj["initial_state"],
+                obj["initial_visible"],
+                obj["label"],
+            ),
+        )
+    print(f"  Extracted {len(missable_objects)} missable objects")
+
+    # =========================================================================
+    # Phase 5: Map music
+    # =========================================================================
+    print("\nPhase 5: Extracting map music...")
     music_data = parse_map_music(map_ids)
     for map_const, map_id, music_const in music_data:
         cursor.execute(
@@ -309,7 +493,7 @@ def main():
 
     # Summary
     print(f"\nResults:")
-    for table in ["hidden_items", "hidden_coins", "hidden_objects", "map_music"]:
+    for table in ["hidden_items", "hidden_coins", "hidden_objects", "missable_objects", "map_music"]:
         cursor.execute(f"SELECT COUNT(*) FROM {table}")
         count = cursor.fetchone()[0]
         print(f"  {table}: {count}")

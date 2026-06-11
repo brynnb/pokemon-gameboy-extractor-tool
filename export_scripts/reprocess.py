@@ -14,20 +14,24 @@ Pipeline order matters! Key dependencies:
                                    otherwise all overworld tiles stack at (0,0) and are invisible)
   4. create_zones_and_tiles.py  - Expands raw blocks into 16x16 tiles with walkability
                                   (reads overworld_map_positions for tile coordinate offsets)
-  5. export_objects.py          - Extracts NPCs, items, signs (incl. trainer_class, trainer_party_index)
-  6. update_object_coordinates.py - Applies overworld offsets to object positions
-  7. export_pokemon.py          - 151 Pokémon with base stats, types, evolution, Pokédex data
-  8. export_moves.py            - 154 moves with power, type, accuracy, effects
-  9. export_items.py            - 138 items with prices, usability, TM/HM links
+  5. export_items.py            - 138 items with prices, usability, TM/HM links
+                                  (MUST run before export_objects.py so visible item balls can resolve item_id)
+  6. export_objects.py          - Extracts NPCs, items, signs (incl. trainer_class, trainer_party_index)
+  7. update_object_coordinates.py - Applies overworld offsets to object positions
+  8. export_pokemon.py          - 151 Pokémon with base stats, types, evolution, Pokédex data
+  9. export_moves.py            - 154 moves with power, type, accuracy, effects
  10. export_text.py             - Dialogue text, text pointers, trainer headers
  11. export_learnsets.py        - Level-up learnsets + TM/HM compatibility
  12. export_wild_encounters.py  - Wild encounters + encounter slot probabilities
  13. export_trainers.py         - Trainer classes, parties, party Pokémon
  14. export_hidden_objects.py   - Hidden items, coins, objects, map music
- 15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
+  15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
+                                   and spin/arrow tile forced movement
+ 16. export_script_candidates.py - Structured candidates for script behaviors
 """
 import subprocess
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -39,18 +43,19 @@ scripts = [
     "export_warps.py",
     "update_zone_coordinates.py",
     "create_zones_and_tiles.py",
+    "export_items.py",
     "export_objects.py",
     "update_object_coordinates.py",
     # Standalone data exports (no order dependency between these)
     "export_pokemon.py",
     "export_moves.py",
-    "export_items.py",
     "export_text.py",
     "export_learnsets.py",
     "export_wild_encounters.py",
     "export_trainers.py",
     "export_hidden_objects.py",
     "export_map_scripts.py",
+    "export_script_candidates.py",
 ]
 
 
@@ -63,6 +68,35 @@ def run_script(script_name):
     except subprocess.CalledProcessError as e:
         print(f"!!! Error running {script_name}: {e}")
         sys.exit(1)
+
+
+def validate_generated_database(db_path):
+    required_tables = [
+        "script_event_ir_blocks",
+        "script_event_candidates",
+        "script_event_candidate_diagnostics",
+        "script_event_in_game_trades",
+        "script_event_tile_overrides",
+        "script_event_boulder_targets",
+        "spin_tiles",
+    ]
+    conn = sqlite3.connect(db_path)
+    try:
+        for table in required_tables:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            if not exists:
+                print(f"!!! Missing generated table: {table}")
+                sys.exit(1)
+            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            if count == 0:
+                print(f"!!! Generated table is empty: {table}")
+                sys.exit(1)
+            print(f"Validated {table}: {count} rows")
+    finally:
+        conn.close()
 
 
 def main():
@@ -80,6 +114,7 @@ def main():
     if db_path.stat().st_size == 0:
         print(f"!!! pokemon.db is empty at {db_path}")
         sys.exit(1)
+    validate_generated_database(db_path)
 
     print(f"\n{'='*60}")
     print("✅ All reprocessing steps completed successfully!")

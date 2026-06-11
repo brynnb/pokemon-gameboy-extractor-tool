@@ -28,6 +28,7 @@ import re
 import sqlite3
 import glob
 import subprocess
+import shutil
 from pathlib import Path
 import binascii
 import argparse
@@ -376,6 +377,7 @@ def ensure_2bpp_files_exist():
     """Check for and generate 2bpp files from PNG files if they don't exist"""
     png_files = glob.glob(f"{TILESETS_DIR}/*.png")
     generated_count = 0
+    files_to_generate = []
 
     for png_file in png_files:
         base_name = os.path.basename(png_file).replace(".png", "")
@@ -385,22 +387,30 @@ def ensure_2bpp_files_exist():
         if not os.path.exists(bpp_file) or os.path.getmtime(
             png_file
         ) > os.path.getmtime(bpp_file):
-            try:
-                print(f"Generating 2bpp file for {base_name}...")
-                result = subprocess.run(
-                    ["rgbgfx", "-o", bpp_file, png_file],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                generated_count += 1
-            except subprocess.CalledProcessError as e:
-                print(f"Error generating 2bpp file for {base_name}: {e}")
-                print(f"stdout: {e.stdout}")
-                print(f"stderr: {e.stderr}")
-            except FileNotFoundError:
-                print("rgbgfx tool not found. Please install RGBDS tools.")
-                break
+            files_to_generate.append((base_name, png_file, bpp_file))
+
+    if files_to_generate and shutil.which("rgbgfx") is None:
+        raise SystemExit(
+            "rgbgfx tool not found. Install RGBDS before running the map export "
+            "(macOS: brew install rgbds, Ubuntu/Debian: sudo apt-get install rgbds)."
+        )
+
+    for base_name, png_file, bpp_file in files_to_generate:
+        try:
+            print(f"Generating 2bpp file for {base_name}...")
+            subprocess.run(
+                ["rgbgfx", "-o", bpp_file, png_file],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            generated_count += 1
+        except subprocess.CalledProcessError as e:
+            raise SystemExit(
+                f"Error generating 2bpp file for {base_name}: {e}\n"
+                f"stdout: {e.stdout}\n"
+                f"stderr: {e.stderr}"
+            ) from e
 
     print(f"Generated {generated_count} 2bpp files")
     return generated_count

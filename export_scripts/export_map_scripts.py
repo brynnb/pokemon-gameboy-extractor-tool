@@ -5,6 +5,7 @@ Extract map script data from the pokered disassembly.
 Parses scripts/*.asm files to extract:
   - Script state machines (script pointers per map)
   - NPC movement data sequences
+  - Spin/arrow tile forced movement data
   - Event flag references (CheckEvent/SetEvent/ResetEvent)
   - Coordinate trigger zones
   - Warp events from data/maps/objects/*.asm
@@ -13,6 +14,7 @@ Parses scripts/*.asm files to extract:
 Creates tables:
   - map_scripts: Script state machine entries per map
   - npc_movement_data: Scripted NPC movement sequences
+  - spin_tiles: Forced player movement tiles decoded from map_coord_movement
   - event_flags: All event flag references across scripts
   - coordinate_triggers: Coordinate-based script triggers
   - warp_events: Map warp/door connections
@@ -39,6 +41,7 @@ def create_tables(conn):
     cursor.execute("DROP TABLE IF EXISTS event_flags")
     cursor.execute("DROP TABLE IF EXISTS coordinate_triggers")
     cursor.execute("DROP TABLE IF EXISTS warp_events")
+    cursor.execute("DROP TABLE IF EXISTS spin_tiles")
 
     # Map script state machine entries
     cursor.execute("""
@@ -58,6 +61,19 @@ def create_tables(conn):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
         label TEXT NOT NULL,
+        movements TEXT NOT NULL
+    )
+    """)
+
+    # Spin/arrow tile forced movement sequences.
+    cursor.execute("""
+    CREATE TABLE spin_tiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        map_name TEXT NOT NULL,
+        source_label TEXT NOT NULL,
+        x INTEGER NOT NULL,
+        y INTEGER NOT NULL,
+        movement_label TEXT NOT NULL,
         movements TEXT NOT NULL
     )
     """)
@@ -189,6 +205,108 @@ def parse_movement_data(content, map_name):
         i += 1
 
     return movements
+
+
+def parse_int_literal(value):
+    value = value.strip()
+    if value.startswith("$"):
+        return int(value[1:], 16)
+    return int(value)
+
+
+def decode_direction(direction):
+    return {
+        "D_UP": "UP",
+        "D_DOWN": "DOWN",
+        "D_LEFT": "LEFT",
+        "D_RIGHT": "RIGHT",
+        "NPC_MOVEMENT_UP": "UP",
+        "NPC_MOVEMENT_DOWN": "DOWN",
+        "NPC_MOVEMENT_LEFT": "LEFT",
+        "NPC_MOVEMENT_RIGHT": "RIGHT",
+    }.get(direction)
+
+
+def parse_rle_movement_blocks(content):
+    movements = {}
+    lines = content.split("\n")
+    i = 0
+
+    while i < len(lines):
+        stripped = lines[i].strip()
+        label_match = re.match(r"^(\.?[A-Za-z0-9_]*Movement[A-Za-z0-9_]*|\.?RLEList_[A-Za-z0-9_]+):", stripped)
+        if not label_match:
+            i += 1
+            continue
+
+        label = label_match.group(1).lstrip(".")
+        sequence = []
+        i += 1
+
+        while i < len(lines):
+            mline = re.sub(r";.*$", "", lines[i]).strip()
+            pair = re.match(r"db\s+(D_\w+|NPC_MOVEMENT_\w+),\s+(\$[0-9a-fA-F]+|\d+)", mline)
+            if pair:
+                direction = decode_direction(pair.group(1))
+                if direction:
+                    sequence.append({
+                        "direction": direction,
+                        "count": parse_int_literal(pair.group(2)),
+                    })
+                i += 1
+                continue
+            if "db -1" in mline or "db $ff" in mline.lower():
+                break
+            if mline and not mline.startswith(";") and not mline.startswith("db"):
+                break
+            i += 1
+
+        if sequence:
+            movements[label] = sequence
+        continue
+
+    return movements
+
+
+def parse_spin_tiles(content, map_name):
+    """
+    Extract arrow/spin tile coordinate movement tables.
+
+    Red/Blue stores these as map_coord_movement rows pointing at RLE movement
+    lists. The macro passes through dbmapcoord x, y, so the first argument is
+    the runtime x coordinate and the second is y. The simulated joypad buffer
+    consumes decoded entries from its end index, so store the compact pairs in
+    runtime order by reversing them.
+    """
+    movement_blocks = parse_rle_movement_blocks(content)
+    spin_tiles = []
+    current_label = None
+
+    for raw_line in content.splitlines():
+        stripped = re.sub(r";.*$", "", raw_line).strip()
+        label_match = re.match(r"^([A-Za-z0-9_]+):$", stripped)
+        if label_match:
+            current_label = label_match.group(1)
+            continue
+
+        match = re.match(r"map_coord_movement\s+(\d+),\s+(\d+),\s+([A-Za-z0-9_]+)", stripped)
+        if not match:
+            continue
+
+        movement_label = match.group(3)
+        movements = movement_blocks.get(movement_label)
+        if not movements:
+            continue
+        spin_tiles.append({
+            "map_name": map_name,
+            "source_label": current_label or "",
+            "x": int(match.group(1)),
+            "y": int(match.group(2)),
+            "movement_label": movement_label,
+            "movements": json.dumps(list(reversed(movements))),
+        })
+
+    return spin_tiles
 
 
 def parse_event_flags(content, map_name):
@@ -363,6 +481,7 @@ def main():
 
     total_scripts = 0
     total_movements = 0
+    total_spin_tiles = 0
     total_flags = 0
     total_coords = 0
     total_warps = 0
@@ -402,7 +521,25 @@ def main():
             )
             total_movements += 1
 
-        # 1c. Event flags
+        # 1c. Spin/arrow tile forced movement
+        spin_tiles = parse_spin_tiles(content, map_name)
+        for tile in spin_tiles:
+            cursor.execute(
+                """INSERT INTO spin_tiles
+                   (map_name, source_label, x, y, movement_label, movements)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    tile["map_name"],
+                    tile["source_label"],
+                    tile["x"],
+                    tile["y"],
+                    tile["movement_label"],
+                    tile["movements"],
+                ),
+            )
+            total_spin_tiles += 1
+
+        # 1d. Event flags
         flags = parse_event_flags(content, map_name)
         for fl in flags:
             cursor.execute(
@@ -413,7 +550,7 @@ def main():
             )
             total_flags += 1
 
-        # 1d. Coordinate triggers
+        # 1e. Coordinate triggers
         coords = parse_coordinate_triggers(content, map_name)
         for ct in coords:
             cursor.execute(
@@ -425,6 +562,7 @@ def main():
 
     print(f"  Scripts: {total_scripts}")
     print(f"  Movement sequences: {total_movements}")
+    print(f"  Spin tiles: {total_spin_tiles}")
     print(f"  Event flag refs: {total_flags}")
     print(f"  Coordinate triggers: {total_coords}")
 
@@ -453,8 +591,8 @@ def main():
     # Summary
     # =========================================================================
     print(f"\nResults:")
-    for table in ["map_scripts", "npc_movement_data", "event_flags",
-                   "coordinate_triggers", "warp_events"]:
+    for table in ["map_scripts", "npc_movement_data", "spin_tiles",
+                   "event_flags", "coordinate_triggers", "warp_events"]:
         cursor.execute(f"SELECT COUNT(*) FROM {table}")
         count = cursor.fetchone()[0]
         print(f"  {table}: {count}")

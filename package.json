@@ -6,6 +6,7 @@
     "scripts": {
         "generate": "./scripts/generate.sh",
         "export": "python3 export_scripts/reprocess.py",
+        "export:script-candidates": "python3 export_scripts/export_script_candidates.py",
         "start": "node server/server.js",
         "dev": "nodemon server/server.js",
         "client": "cd pokemon-phaser && npm run dev",

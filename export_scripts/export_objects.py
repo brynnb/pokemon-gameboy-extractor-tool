@@ -63,6 +63,20 @@ def get_all_maps(cursor):
     return {name: id for id, name in cursor.fetchall()}
 
 
+def load_map_header_constants():
+    """Map source header names like MtMoonB2F to constants like MT_MOON_B2F."""
+    constants = {}
+    for header_path in MAP_HEADERS_DIR.glob("*.asm"):
+        with open(header_path, "r") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                match = re.match(r"map_header\s+(\w+),\s+(\w+),", line)
+                if match:
+                    constants[match.group(1)] = match.group(2)
+                    break
+    return constants
+
+
 def convert_camel_to_upper_underscore(name):
     """Convert CamelCase to UPPER_CASE_WITH_UNDERSCORES"""
     # Insert underscore between lowercase and uppercase (e.g. CamelCase -> Camel_Case)
@@ -71,11 +85,15 @@ def convert_camel_to_upper_underscore(name):
     s2 = re.sub("([A-Z])([A-Z][a-z])", r"\1_\2", s1)
     # Insert underscore between letters and digits (e.g. Route16 -> Route_16)
     s3 = re.sub("([a-zA-Z])([0-9])", r"\1_\2", s2)
-    return s3.upper()
+    # Insert underscore between digits and following letters (e.g. Route2Gate -> Route_2_Gate)
+    s4 = re.sub("([0-9])([A-Za-z])", r"\1_\2", s3)
+    return s4.upper()
 
 
-def get_map_id_for_map(map_name, cursor):
+def get_map_id_for_map(map_name, cursor, header_constants=None):
     """Get map ID for a map from the maps table"""
+    header_constants = header_constants or {}
+
     # Try exact match first
     cursor.execute("SELECT id FROM maps WHERE name = ?", (map_name,))
     result = cursor.fetchone()
@@ -87,6 +105,14 @@ def get_map_id_for_map(map_name, cursor):
     result = cursor.fetchone()
     if result:
         return result[0]
+
+    # Original source headers provide the authoritative map constant.
+    map_constant = header_constants.get(map_name)
+    if map_constant:
+        cursor.execute("SELECT id FROM maps WHERE name = ?", (map_constant,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
 
     # Convert CamelCase to UPPER_CASE_WITH_UNDERSCORES
     upper_with_underscores = convert_camel_to_upper_underscore(map_name)
@@ -300,13 +326,13 @@ def parse_object_events(content, map_name, cursor):
     return objects
 
 
-def process_map_file(file_path, cursor):
+def process_map_file(file_path, cursor, header_constants):
     """Process a single map object file and extract all objects"""
     map_name = parse_map_name_from_file(file_path)
 
     # Get map ID for this map
-    map_id = get_map_id_for_map(map_name, cursor)
-    if not map_id:
+    map_id = get_map_id_for_map(map_name, cursor, header_constants)
+    if map_id is None:
         print(f"Warning: Could not find map ID for map {map_name}")
         return []
 
@@ -328,6 +354,7 @@ def process_map_file(file_path, cursor):
 def main():
     # Create database
     conn, cursor = create_database()
+    header_constants = load_map_header_constants()
 
     # Get all map object files
     map_files = list(POKEMON_DATA_DIR.glob("*.asm"))
@@ -338,7 +365,7 @@ def main():
     processed_count = 0
 
     for file_path in map_files:
-        objects = process_map_file(file_path, cursor)
+        objects = process_map_file(file_path, cursor, header_constants)
         all_objects.extend(objects)
         processed_count += 1
 

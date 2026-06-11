@@ -1,0 +1,1192 @@
+[
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "LoreleisRoom",
+    "replacements": [
+      {
+        "blockId": 36,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "LoreleiExitBlockClosed",
+        "requiresEventAbsent": "EVENT_BEAT_LORELEIS_ROOM_TRAINER_0"
+      },
+      {
+        "blockId": 5,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "LoreleiExitBlockOpen",
+        "requiresEvent": "EVENT_BEAT_LORELEIS_ROOM_TRAINER_0"
+      }
+    ],
+    "scriptLabel": "LoreleiShowOrHideExitBlock",
+    "source": {
+      "adapter": "elite_four_exit_tile_override_v1",
+      "coveredLabels": [
+        "LoreleiShowOrHideExitBlock"
+      ],
+      "mapName": "LoreleisRoom",
+      "notes": [
+        "sourceBlock=LoreleiShowOrHideExitBlock",
+        "Generated from CheckEvent + ReplaceTileBlock Elite Four exit-block map-load state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/LoreleisRoom.asm",
+      "textPath": "pokemon-game-data/text/LoreleisRoom.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "BrunosRoom",
+    "replacements": [
+      {
+        "blockId": 36,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "BrunoExitBlockClosed",
+        "requiresEventAbsent": "EVENT_BEAT_BRUNOS_ROOM_TRAINER_0"
+      },
+      {
+        "blockId": 5,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "BrunoExitBlockOpen",
+        "requiresEvent": "EVENT_BEAT_BRUNOS_ROOM_TRAINER_0"
+      }
+    ],
+    "scriptLabel": "BrunoShowOrHideExitBlock",
+    "source": {
+      "adapter": "elite_four_exit_tile_override_v1",
+      "coveredLabels": [
+        "BrunoShowOrHideExitBlock"
+      ],
+      "mapName": "BrunosRoom",
+      "notes": [
+        "sourceBlock=BrunoShowOrHideExitBlock",
+        "Generated from CheckEvent + ReplaceTileBlock Elite Four exit-block map-load state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/BrunosRoom.asm",
+      "textPath": "pokemon-game-data/text/BrunosRoom.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "AgathasRoom",
+    "replacements": [
+      {
+        "blockId": 59,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "AgathaExitBlockClosed",
+        "requiresEventAbsent": "EVENT_BEAT_AGATHAS_ROOM_TRAINER_0"
+      },
+      {
+        "blockId": 14,
+        "blockX": 0,
+        "blockY": 2,
+        "labelPrefix": "AgathaExitBlockOpen",
+        "requiresEvent": "EVENT_BEAT_AGATHAS_ROOM_TRAINER_0"
+      }
+    ],
+    "scriptLabel": "AgathaShowOrHideExitBlock",
+    "source": {
+      "adapter": "elite_four_exit_tile_override_v1",
+      "coveredLabels": [
+        "AgathaShowOrHideExitBlock"
+      ],
+      "mapName": "AgathasRoom",
+      "notes": [
+        "sourceBlock=AgathaShowOrHideExitBlock",
+        "Generated from CheckEvent + ReplaceTileBlock Elite Four exit-block map-load state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/AgathasRoom.asm",
+      "textPath": "pokemon-game-data/text/AgathasRoom.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "LancesRoom",
+    "replacements": [
+      {
+        "blockId": 49,
+        "blockX": 6,
+        "blockY": 2,
+        "labelPrefix": "LanceEntranceLeftOpen",
+        "requiresEventAbsent": "EVENT_LANCES_ROOM_LOCK_DOOR"
+      },
+      {
+        "blockId": 50,
+        "blockX": 6,
+        "blockY": 3,
+        "labelPrefix": "LanceEntranceRightOpen",
+        "requiresEventAbsent": "EVENT_LANCES_ROOM_LOCK_DOOR"
+      },
+      {
+        "blockId": 114,
+        "blockX": 6,
+        "blockY": 2,
+        "labelPrefix": "LanceEntranceLeftClosed",
+        "requiresEvent": "EVENT_LANCES_ROOM_LOCK_DOOR"
+      },
+      {
+        "blockId": 115,
+        "blockX": 6,
+        "blockY": 3,
+        "labelPrefix": "LanceEntranceRightClosed",
+        "requiresEvent": "EVENT_LANCES_ROOM_LOCK_DOOR"
+      }
+    ],
+    "scriptLabel": "LancesRoomEntranceBlocks",
+    "source": {
+      "adapter": "lance_room_entrance_tile_override_v1",
+      "coveredLabels": [
+        "LanceShowOrHideEntranceBlocks"
+      ],
+      "mapName": "LancesRoom",
+      "notes": [
+        "sourceBlock=LanceShowOrHideEntranceBlocks",
+        "Generated from Lance room's two-block entrance lock ReplaceTileBlock map-load state.",
+        "The source sets EVENT_LANCES_ROOM_LOCK_DOOR from LancesRoomDefaultScript; this candidate covers tile state only."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/LancesRoom.asm",
+      "textPath": "pokemon-game-data/text/LancesRoom.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "PokemonMansion1F",
+    "replacements": [
+      {
+        "blockId": 14,
+        "blockX": 6,
+        "blockY": 12,
+        "labelPrefix": "PokemonMansionSwitchOff_1F_6_12",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 45,
+        "blockX": 3,
+        "blockY": 8,
+        "labelPrefix": "PokemonMansionSwitchOff_1F_3_8",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 45,
+        "blockX": 8,
+        "blockY": 10,
+        "labelPrefix": "PokemonMansionSwitchOff_1F_8_10",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 45,
+        "blockX": 13,
+        "blockY": 13,
+        "labelPrefix": "PokemonMansionSwitchOff_1F_13_13",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 45,
+        "blockX": 6,
+        "blockY": 12,
+        "labelPrefix": "PokemonMansionSwitchOn_1F_6_12",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 3,
+        "blockY": 8,
+        "labelPrefix": "PokemonMansionSwitchOn_1F_3_8",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 8,
+        "blockY": 10,
+        "labelPrefix": "PokemonMansionSwitchOn_1F_8_10",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 13,
+        "blockY": 13,
+        "labelPrefix": "PokemonMansionSwitchOn_1F_13_13",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      }
+    ],
+    "scriptLabel": "PokemonMansion1FSwitchDoorTiles",
+    "source": {
+      "adapter": "pokemon_mansion_switch_tile_override_v1",
+      "coveredLabels": [
+        "Mansion1CheckReplaceSwitchDoorBlocks"
+      ],
+      "mapName": "PokemonMansion1F",
+      "notes": [
+        "sourceBlock=Mansion1CheckReplaceSwitchDoorBlocks",
+        "Generated from Pokemon Mansion switch map-load ReplaceTileBlock state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/PokemonMansion1F.asm",
+      "textPath": "pokemon-game-data/text/PokemonMansion1F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "PokemonMansion2F",
+    "replacements": [
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 4,
+        "labelPrefix": "PokemonMansionSwitchOff_2F_2_4",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 84,
+        "blockX": 4,
+        "blockY": 9,
+        "labelPrefix": "PokemonMansionSwitchOff_2F_4_9",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 11,
+        "blockY": 3,
+        "labelPrefix": "PokemonMansionSwitchOff_2F_11_3",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 2,
+        "blockY": 4,
+        "labelPrefix": "PokemonMansionSwitchOn_2F_2_4",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 4,
+        "blockY": 9,
+        "labelPrefix": "PokemonMansionSwitchOn_2F_4_9",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 11,
+        "blockY": 3,
+        "labelPrefix": "PokemonMansionSwitchOn_2F_11_3",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      }
+    ],
+    "scriptLabel": "PokemonMansion2FSwitchDoorTiles",
+    "source": {
+      "adapter": "pokemon_mansion_switch_tile_override_v1",
+      "coveredLabels": [
+        "Mansion2CheckReplaceSwitchDoorBlocks"
+      ],
+      "mapName": "PokemonMansion2F",
+      "notes": [
+        "sourceBlock=Mansion2CheckReplaceSwitchDoorBlocks",
+        "Generated from Pokemon Mansion switch map-load ReplaceTileBlock state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/PokemonMansion2F.asm",
+      "textPath": "pokemon-game-data/text/PokemonMansion2F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "PokemonMansion3F",
+    "replacements": [
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 7,
+        "labelPrefix": "PokemonMansionSwitchOff_3F_2_7",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 5,
+        "blockY": 7,
+        "labelPrefix": "PokemonMansionSwitchOff_3F_5_7",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 2,
+        "blockY": 7,
+        "labelPrefix": "PokemonMansionSwitchOn_3F_2_7",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 5,
+        "blockY": 7,
+        "labelPrefix": "PokemonMansionSwitchOn_3F_5_7",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      }
+    ],
+    "scriptLabel": "PokemonMansion3FSwitchDoorTiles",
+    "source": {
+      "adapter": "pokemon_mansion_switch_tile_override_v1",
+      "coveredLabels": [
+        "Mansion3CheckReplaceSwitchDoorBlocks"
+      ],
+      "mapName": "PokemonMansion3F",
+      "notes": [
+        "sourceBlock=Mansion3CheckReplaceSwitchDoorBlocks",
+        "Generated from Pokemon Mansion switch map-load ReplaceTileBlock state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/PokemonMansion3F.asm",
+      "textPath": "pokemon-game-data/text/PokemonMansion3F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "PokemonMansionB1F",
+    "replacements": [
+      {
+        "blockId": 14,
+        "blockX": 8,
+        "blockY": 13,
+        "labelPrefix": "PokemonMansionSwitchOff_B1F_8_13",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 11,
+        "blockY": 6,
+        "labelPrefix": "PokemonMansionSwitchOff_B1F_11_6",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 3,
+        "blockY": 4,
+        "labelPrefix": "PokemonMansionSwitchOff_B1F_3_4",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 84,
+        "blockX": 8,
+        "blockY": 8,
+        "labelPrefix": "PokemonMansionSwitchOff_B1F_8_8",
+        "requiresEventAbsent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 45,
+        "blockX": 8,
+        "blockY": 13,
+        "labelPrefix": "PokemonMansionSwitchOn_B1F_8_13",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 95,
+        "blockX": 11,
+        "blockY": 6,
+        "labelPrefix": "PokemonMansionSwitchOn_B1F_11_6",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 3,
+        "blockY": 4,
+        "labelPrefix": "PokemonMansionSwitchOn_B1F_3_4",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      },
+      {
+        "blockId": 14,
+        "blockX": 8,
+        "blockY": 8,
+        "labelPrefix": "PokemonMansionSwitchOn_B1F_8_8",
+        "requiresEvent": "EVENT_MANSION_SWITCH_ON"
+      }
+    ],
+    "scriptLabel": "PokemonMansionB1FSwitchDoorTiles",
+    "source": {
+      "adapter": "pokemon_mansion_switch_tile_override_v1",
+      "coveredLabels": [
+        "MansionB1FCheckReplaceSwitchDoorBlocks"
+      ],
+      "mapName": "PokemonMansionB1F",
+      "notes": [
+        "sourceBlock=MansionB1FCheckReplaceSwitchDoorBlocks",
+        "Generated from Pokemon Mansion switch map-load ReplaceTileBlock state."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/PokemonMansionB1F.asm",
+      "textPath": "pokemon-game-data/text/PokemonMansionB1F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo10F",
+    "replacements": [
+      {
+        "blockId": 84,
+        "blockX": 5,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_10F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_10_UNLOCKED_DOOR"
+      },
+      {
+        "blockId": 14,
+        "blockX": 5,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_10F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_10_UNLOCKED_DOOR"
+      }
+    ],
+    "scriptLabel": "SilphCo10FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo10FGateCallbackScript",
+        "SilphCo10F_SetUnlockedSilphCoDoorsScript"
+      ],
+      "mapName": "SilphCo10F",
+      "notes": [
+        "sourceBlock=SilphCo10FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo10F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo10F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo11F",
+    "replacements": [
+      {
+        "blockId": 32,
+        "blockX": 3,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_11F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_11_UNLOCKED_DOOR"
+      },
+      {
+        "blockId": 3,
+        "blockX": 3,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_11F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_11_UNLOCKED_DOOR"
+      }
+    ],
+    "scriptLabel": "SilphCo11FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo11FGateCallbackScript",
+        "SilphCo11FSetUnlockedDoorEventScript",
+        "SilphCo11F_SetCardKeyDoorYScript"
+      ],
+      "mapName": "SilphCo11F",
+      "notes": [
+        "sourceBlock=SilphCo11FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo11F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo11F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo2F",
+    "replacements": [
+      {
+        "blockId": 84,
+        "blockX": 2,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_2F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_2_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_2F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_2_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 84,
+        "blockX": 2,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_2F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_2_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_2F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_2_UNLOCKED_DOOR2"
+      }
+    ],
+    "scriptLabel": "SilphCo2FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo2FGateCallbackScript",
+        "SilphCo2F_SetCardKeyDoorYScript",
+        "SilphCo2F_UnlockedDoorEventScript"
+      ],
+      "mapName": "SilphCo2F",
+      "notes": [
+        "sourceBlock=SilphCo2FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo2F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo2F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo3F",
+    "replacements": [
+      {
+        "blockId": 95,
+        "blockX": 4,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_3F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_3_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 4,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_3F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_3_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 95,
+        "blockX": 8,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_3F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_3_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 8,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_3F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_3_UNLOCKED_DOOR2"
+      }
+    ],
+    "scriptLabel": "SilphCo3FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo3FGateCallbackScript",
+        "SilphCo3F_UnlockedDoorEventScript"
+      ],
+      "mapName": "SilphCo3F",
+      "notes": [
+        "sourceBlock=SilphCo3FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo3F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo3F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo4F",
+    "replacements": [
+      {
+        "blockId": 84,
+        "blockX": 2,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_4F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_4_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_4F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_4_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 84,
+        "blockX": 6,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_4F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_4_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 6,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_4F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_4_UNLOCKED_DOOR2"
+      }
+    ],
+    "scriptLabel": "SilphCo4FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo4FGateCallbackScript",
+        "SilphCo4FUnlockedDoorEventScript",
+        "SilphCo4F_SetCardKeyDoorYScript"
+      ],
+      "mapName": "SilphCo4F",
+      "notes": [
+        "sourceBlock=SilphCo4FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo4F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo4F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo5F",
+    "replacements": [
+      {
+        "blockId": 95,
+        "blockX": 3,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_5F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 3,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_5F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 95,
+        "blockX": 3,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_5F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 3,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_5F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 95,
+        "blockX": 7,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_5F_3_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR3"
+      },
+      {
+        "blockId": 14,
+        "blockX": 7,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_5F_3_Open",
+        "requiresEvent": "EVENT_SILPH_CO_5_UNLOCKED_DOOR3"
+      }
+    ],
+    "scriptLabel": "SilphCo5FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo5FGateCallbackScript",
+        "SilphCo5F_SetUnlockedSilphCoDoorsScript"
+      ],
+      "mapName": "SilphCo5F",
+      "notes": [
+        "sourceBlock=SilphCo5FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo5F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo5F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo6F",
+    "replacements": [
+      {
+        "blockId": 95,
+        "blockX": 2,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_6F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_6_UNLOCKED_DOOR"
+      },
+      {
+        "blockId": 14,
+        "blockX": 2,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_6F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_6_UNLOCKED_DOOR"
+      }
+    ],
+    "scriptLabel": "SilphCo6FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo6F_GateCallbackScript",
+        "SilphCo6F_UnlockedDoorEventScript"
+      ],
+      "mapName": "SilphCo6F",
+      "notes": [
+        "sourceBlock=SilphCo6F_GateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo6F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo6F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo7F",
+    "replacements": [
+      {
+        "blockId": 84,
+        "blockX": 5,
+        "blockY": 3,
+        "labelPrefix": "SilphCardKeyDoor_7F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 5,
+        "blockY": 3,
+        "labelPrefix": "SilphCardKeyDoor_7F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 84,
+        "blockX": 10,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_7F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 10,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_7F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 84,
+        "blockX": 10,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_7F_3_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR3"
+      },
+      {
+        "blockId": 14,
+        "blockX": 10,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_7F_3_Open",
+        "requiresEvent": "EVENT_SILPH_CO_7_UNLOCKED_DOOR3"
+      }
+    ],
+    "scriptLabel": "SilphCo7FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo7F_GateCallbackScript",
+        "SilphCo7F_SetCardKeyDoorYScript",
+        "SilphCo7F_UnlockedDoorEventScript"
+      ],
+      "mapName": "SilphCo7F",
+      "notes": [
+        "sourceBlock=SilphCo7F_GateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo7F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo7F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo8F",
+    "replacements": [
+      {
+        "blockId": 95,
+        "blockX": 3,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_8F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_8_UNLOCKED_DOOR"
+      },
+      {
+        "blockId": 14,
+        "blockX": 3,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_8F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_8_UNLOCKED_DOOR"
+      }
+    ],
+    "scriptLabel": "SilphCo8FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo8FGateCallbackScript",
+        "SilphCo8F_SetCardKeyDoorYScript",
+        "SilphCo8F_UnlockedDoorEventScript"
+      ],
+      "mapName": "SilphCo8F",
+      "notes": [
+        "sourceBlock=SilphCo8FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo8F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo8F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "SilphCo9F",
+    "replacements": [
+      {
+        "blockId": 95,
+        "blockX": 1,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_9F_1_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 14,
+        "blockX": 1,
+        "blockY": 4,
+        "labelPrefix": "SilphCardKeyDoor_9F_1_Open",
+        "requiresEvent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR1"
+      },
+      {
+        "blockId": 84,
+        "blockX": 9,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_9F_2_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 14,
+        "blockX": 9,
+        "blockY": 2,
+        "labelPrefix": "SilphCardKeyDoor_9F_2_Open",
+        "requiresEvent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR2"
+      },
+      {
+        "blockId": 84,
+        "blockX": 9,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_9F_3_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR3"
+      },
+      {
+        "blockId": 14,
+        "blockX": 9,
+        "blockY": 5,
+        "labelPrefix": "SilphCardKeyDoor_9F_3_Open",
+        "requiresEvent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR3"
+      },
+      {
+        "blockId": 95,
+        "blockX": 5,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_9F_4_Closed",
+        "requiresEventAbsent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR4"
+      },
+      {
+        "blockId": 14,
+        "blockX": 5,
+        "blockY": 6,
+        "labelPrefix": "SilphCardKeyDoor_9F_4_Open",
+        "requiresEvent": "EVENT_SILPH_CO_9_UNLOCKED_DOOR4"
+      }
+    ],
+    "scriptLabel": "SilphCo9FCardKeyDoors",
+    "source": {
+      "adapter": "silph_card_key_tile_override_v1",
+      "coveredLabels": [
+        "SilphCo9FGateCallbackScript",
+        "SilphCo9F_SetCardKeyDoorYScript",
+        "SilphCo9F_SetUnlockedSilphCoDoorsScript"
+      ],
+      "mapName": "SilphCo9F",
+      "notes": [
+        "sourceBlock=SilphCo9FGateCallbackScript",
+        "Generated from Silph Co Card Key map-load gate callback and shared Card Key open-block behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/SilphCo9F.asm",
+      "textPath": "pokemon-game-data/text/SilphCo9F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "VictoryRoad1F",
+    "replacements": [
+      {
+        "blockId": 29,
+        "blockX": 4,
+        "blockY": 6,
+        "labelPrefix": "VictoryRoadBoulderBlock_1F_Switch_1d",
+        "requiresEvent": "EVENT_VICTORY_ROAD_1_BOULDER_ON_SWITCH"
+      }
+    ],
+    "scriptLabel": "VictoryRoad1FBoulderSwitchTiles",
+    "source": {
+      "adapter": "victory_road_boulder_tile_override_v1",
+      "coveredLabels": [
+        "VictoryRoad1F_Script"
+      ],
+      "mapName": "VictoryRoad1F",
+      "notes": [
+        "sourceBlock=VictoryRoad1F_Script",
+        "Generated from Victory Road boulder switch map-load tile replacement checks.",
+        "This candidate covers tile state only; boulder push/switch-setting behavior remains a separate runtime concern."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad1F.asm",
+      "textPath": "pokemon-game-data/text/VictoryRoad1F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "VictoryRoad2F",
+    "replacements": [
+      {
+        "blockId": 21,
+        "blockX": 3,
+        "blockY": 4,
+        "labelPrefix": "VictoryRoadBoulderBlock_2F_Switch1_15",
+        "requiresEvent": "EVENT_VICTORY_ROAD_2_BOULDER_ON_SWITCH1"
+      },
+      {
+        "blockId": 29,
+        "blockX": 11,
+        "blockY": 7,
+        "labelPrefix": "VictoryRoadBoulderBlock_2F_Switch2_1d",
+        "requiresEvent": "EVENT_VICTORY_ROAD_2_BOULDER_ON_SWITCH2"
+      }
+    ],
+    "scriptLabel": "VictoryRoad2FBoulderSwitchTiles",
+    "source": {
+      "adapter": "victory_road_boulder_tile_override_v1",
+      "coveredLabels": [
+        "VictoryRoad2FCheckBoulderEventScript",
+        "VictoryRoad2FReplaceTileBlockScript"
+      ],
+      "mapName": "VictoryRoad2F",
+      "notes": [
+        "sourceBlock=VictoryRoad2FCheckBoulderEventScript",
+        "Generated from Victory Road boulder switch map-load tile replacement checks.",
+        "This candidate covers tile state only; boulder push/switch-setting behavior remains a separate runtime concern."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad2F.asm",
+      "textPath": "pokemon-game-data/text/VictoryRoad2F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "VictoryRoad3F",
+    "replacements": [
+      {
+        "blockId": 29,
+        "blockX": 3,
+        "blockY": 5,
+        "labelPrefix": "VictoryRoadBoulderBlock_3F_Switch_1d",
+        "requiresEvent": "EVENT_VICTORY_ROAD_3_BOULDER_ON_SWITCH1"
+      }
+    ],
+    "scriptLabel": "VictoryRoad3FBoulderSwitchTiles",
+    "source": {
+      "adapter": "victory_road_boulder_tile_override_v1",
+      "coveredLabels": [
+        "VictoryRoad3FCheckBoulderEventScript"
+      ],
+      "mapName": "VictoryRoad3F",
+      "notes": [
+        "sourceBlock=VictoryRoad3FCheckBoulderEventScript",
+        "Generated from Victory Road boulder switch map-load tile replacement checks.",
+        "This candidate covers tile state only; boulder push/switch-setting behavior remains a separate runtime concern."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad3F.asm",
+      "textPath": "pokemon-game-data/text/VictoryRoad3F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "VermilionGym",
+    "replacements": [
+      {
+        "blockId": 36,
+        "blockX": 2,
+        "blockY": 2,
+        "labelPrefix": "VermilionGymTrashDoorClosed",
+        "requiresEventAbsent": "EVENT_2ND_LOCK_OPENED"
+      },
+      {
+        "blockId": 5,
+        "blockX": 2,
+        "blockY": 2,
+        "labelPrefix": "VermilionGymTrashDoorOpen",
+        "requiresEvent": "EVENT_2ND_LOCK_OPENED"
+      }
+    ],
+    "scriptLabel": "VermilionGymTrashDoorTiles",
+    "source": {
+      "adapter": "vermilion_gym_trash_door_tile_override_v1",
+      "coveredLabels": [
+        "VermilionGymSetDoorTile"
+      ],
+      "mapName": "VermilionGym",
+      "notes": [
+        "sourceBlock=VermilionGymSetDoorTile",
+        "Generated from the Vermilion Gym second-lock map-load door tile replacement."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VermilionGym.asm",
+      "textPath": "pokemon-game-data/text/VermilionGym.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "GameCorner",
+    "replacements": [
+      {
+        "blockId": 42,
+        "blockX": 8,
+        "blockY": 2,
+        "labelPrefix": "GameCornerRocketHideoutDoorClosed",
+        "requiresEventAbsent": "EVENT_FOUND_ROCKET_HIDEOUT"
+      },
+      {
+        "blockId": 67,
+        "blockX": 8,
+        "blockY": 2,
+        "labelPrefix": "GameCornerRocketHideoutDoorOpen",
+        "requiresEvent": "EVENT_FOUND_ROCKET_HIDEOUT"
+      }
+    ],
+    "scriptLabel": "GameCornerRocketHideoutDoorTile",
+    "source": {
+      "adapter": "game_corner_rocket_hideout_tile_override_v1",
+      "coveredLabels": [
+        "GameCornerSetRocketHideoutDoorTile"
+      ],
+      "mapName": "GameCorner",
+      "notes": [
+        "sourceBlock=GameCornerSetRocketHideoutDoorTile",
+        "sourceBlock=GameCornerPosterText",
+        "Generated from the Game Corner poster switch's map-load and immediate ReplaceTileBlock behavior."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/GameCorner.asm",
+      "textPath": "pokemon-game-data/text/GameCorner.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "RocketHideoutB1F",
+    "replacements": [
+      {
+        "blockId": 84,
+        "blockX": 12,
+        "blockY": 8,
+        "labelPrefix": "RocketHideoutB1FDoorClosed",
+        "requiresEventAbsent": "EVENT_677"
+      },
+      {
+        "blockId": 14,
+        "blockX": 12,
+        "blockY": 8,
+        "labelPrefix": "RocketHideoutB1FDoorOpen",
+        "requiresEvent": "EVENT_677"
+      }
+    ],
+    "scriptLabel": "RocketHideoutB1FDoorTile",
+    "source": {
+      "adapter": "rocket_hideout_door_tile_override_v1",
+      "coveredLabels": [
+        "RocketHideoutB1FDoorCallbackScript"
+      ],
+      "mapName": "RocketHideoutB1F",
+      "notes": [
+        "sourceBlock=RocketHideoutB1FDoorCallbackScript",
+        "Generated from Rocket Hideout door map-load ReplaceTileBlock behavior.",
+        "Door unlock flag sync is emitted as a companion map_script candidate."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/RocketHideoutB1F.asm",
+      "textPath": "pokemon-game-data/text/RocketHideoutB1F.asm"
+    },
+    "version": 1
+  },
+  {
+    "confidence": "adapter",
+    "kind": "eventTileOverrideCandidate",
+    "mapName": "RocketHideoutB4F",
+    "replacements": [
+      {
+        "blockId": 45,
+        "blockX": 12,
+        "blockY": 5,
+        "labelPrefix": "RocketHideoutB4FDoorClosed",
+        "requiresEventAbsent": "EVENT_ROCKET_HIDEOUT_4_DOOR_UNLOCKED"
+      },
+      {
+        "blockId": 14,
+        "blockX": 12,
+        "blockY": 5,
+        "labelPrefix": "RocketHideoutB4FDoorOpen",
+        "requiresEvent": "EVENT_ROCKET_HIDEOUT_4_DOOR_UNLOCKED"
+      }
+    ],
+    "scriptLabel": "RocketHideoutB4FDoorTile",
+    "source": {
+      "adapter": "rocket_hideout_door_tile_override_v1",
+      "coveredLabels": [
+        "RocketHideoutB4FDoorCallbackScript"
+      ],
+      "mapName": "RocketHideoutB4F",
+      "notes": [
+        "sourceBlock=RocketHideoutB4FDoorCallbackScript",
+        "Generated from Rocket Hideout door map-load ReplaceTileBlock behavior.",
+        "Door unlock flag sync is emitted as a companion map_script candidate."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/RocketHideoutB4F.asm",
+      "textPath": "pokemon-game-data/text/RocketHideoutB4F.asm"
+    },
+    "version": 1
+  }
+]

@@ -15,6 +15,10 @@ tile_images/
 
 # Database files
 /pokemon.db
+/script_event_candidates.json
+/script_event_in_game_trades.json
+/script_event_ir.json
+/script_event_diagnostics.json
 *.db
 *.sqlite
 *.sqlite3

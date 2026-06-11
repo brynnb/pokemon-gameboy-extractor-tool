@@ -52,19 +52,30 @@ def get_map_dimensions(cursor, map_id):
     return cursor.fetchone()
 
 
-def update_map_coordinates(conn, map_id, x_offset, y_offset):
+def table_exists(cursor, table_name):
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def update_map_coordinates(conn, map_id, x_offset, y_offset, update_tiles):
     """Update the coordinates of a map in the tiles table and save the position metadata"""
     cursor = conn.cursor()
+    updated_tiles = 0
 
     # 1. Update the actual tiles if they exist
-    cursor.execute(
-        """
-        UPDATE tiles
-        SET x = x + ?, y = y + ?
-        WHERE map_id = ?
-        """,
-        (x_offset, y_offset, map_id),
-    )
+    if update_tiles:
+        cursor.execute(
+            """
+            UPDATE tiles
+            SET x = x + ?, y = y + ?
+            WHERE map_id = ?
+            """,
+            (x_offset, y_offset, map_id),
+        )
+        updated_tiles = cursor.rowcount
 
     # 2. Save the offset to the metadata table so other scripts (like tile generation) can use it
     cursor.execute("SELECT name FROM maps WHERE id = ?", (map_id,))
@@ -79,7 +90,7 @@ def update_map_coordinates(conn, map_id, x_offset, y_offset):
     )
 
     conn.commit()
-    return cursor.rowcount
+    return updated_tiles
 
 
 def get_map_name(cursor, map_id):
@@ -200,6 +211,9 @@ def get_all_map_names(cursor):
 def process_map_connections(conn):
     """Process all map connections"""
     cursor = conn.cursor()
+    update_tiles = table_exists(cursor, "tiles")
+    if not update_tiles:
+        print("tiles table does not exist yet; writing overworld_map_positions metadata only")
 
     # Get all map names
     map_names = get_all_map_names(cursor)
@@ -214,17 +228,22 @@ def process_map_connections(conn):
             continue
 
         # First, reset the map to its original position (0,0)
-        cursor.execute(
-            "SELECT MIN(x), MIN(y) FROM tiles WHERE map_id = ?", (current_map_id,)
-        )
-        min_x, min_y = cursor.fetchone()
+        if update_tiles:
+            cursor.execute(
+                "SELECT MIN(x), MIN(y) FROM tiles WHERE map_id = ?", (current_map_id,)
+            )
+            min_x, min_y = cursor.fetchone()
+            min_x = min_x or 0
+            min_y = min_y or 0
+        else:
+            min_x, min_y = 0, 0
 
         # Reset to (0,0)
-        update_map_coordinates(conn, current_map_id, -min_x, -min_y)
+        update_map_coordinates(conn, current_map_id, -min_x, -min_y, update_tiles)
 
         # Then apply the calculated offsets
         updated_tiles = update_map_coordinates(
-            conn, current_map_id, current_x_offset, current_y_offset
+            conn, current_map_id, current_x_offset, current_y_offset, update_tiles
         )
         map_name = get_map_name(cursor, current_map_id)
         print(
@@ -304,16 +323,27 @@ def main():
 
         # Verify the results
         print("\nFinal coordinates:")
+        has_tiles = table_exists(cursor, "tiles")
         for map_id in processed_maps:
-            cursor.execute(
-                "SELECT MIN(x), MAX(x), MIN(y), MAX(y) FROM tiles WHERE map_id = ?",
-                (map_id,),
-            )
-            coords = cursor.fetchone()
             map_name = get_map_name(cursor, map_id)
-            print(
-                f"{map_name} (map_id {map_id}): x={coords[0]} to {coords[1]}, y={coords[2]} to {coords[3]}"
-            )
+            if has_tiles:
+                cursor.execute(
+                    "SELECT MIN(x), MAX(x), MIN(y), MAX(y) FROM tiles WHERE map_id = ?",
+                    (map_id,),
+                )
+                coords = cursor.fetchone()
+                print(
+                    f"{map_name} (map_id {map_id}): x={coords[0]} to {coords[1]}, y={coords[2]} to {coords[3]}"
+                )
+            else:
+                cursor.execute(
+                    "SELECT x_offset, y_offset FROM overworld_map_positions WHERE map_id = ?",
+                    (map_id,),
+                )
+                offsets = cursor.fetchone()
+                print(
+                    f"{map_name} (map_id {map_id}): offset=({offsets[0]}, {offsets[1]})"
+                )
 
         elapsed_time = time.time() - start_time
         print(f"\nTotal time: {elapsed_time:.2f} seconds")

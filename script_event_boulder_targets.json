@@ -1,0 +1,133 @@
+[
+  {
+    "confidence": "adapter",
+    "destinationMapName": "",
+    "destinationMissableObject": "",
+    "dropsThroughHole": false,
+    "flag": "EVENT_VICTORY_ROAD_1_BOULDER_ON_SWITCH",
+    "kind": "boulderTarget",
+    "mapName": "VictoryRoad1F",
+    "source": {
+      "adapter": "victory_road_boulder_target_v1",
+      "mapName": "VictoryRoad1F",
+      "notes": [
+        "sourceBlock=VictoryRoad1FDefaultScript",
+        "sourceCoords=.SwitchCoords",
+        "Generated from CheckBoulderCoords switch/hole target tables and source event flags."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad1F.asm"
+    },
+    "sourceFile": "pokemon-game-data/scripts/VictoryRoad1F.asm",
+    "sourceLabel": "VictoryRoad1FDefaultScript",
+    "sourceMissableObject": "",
+    "targetFamily": "victory_road",
+    "version": 1,
+    "x": 17,
+    "y": 13
+  },
+  {
+    "confidence": "adapter",
+    "destinationMapName": "",
+    "destinationMissableObject": "",
+    "dropsThroughHole": false,
+    "flag": "EVENT_VICTORY_ROAD_2_BOULDER_ON_SWITCH1",
+    "kind": "boulderTarget",
+    "mapName": "VictoryRoad2F",
+    "source": {
+      "adapter": "victory_road_boulder_target_v1",
+      "mapName": "VictoryRoad2F",
+      "notes": [
+        "sourceBlock=VictoryRoad2FDefaultScript",
+        "sourceCoords=.SwitchCoords",
+        "Generated from CheckBoulderCoords switch/hole target tables and source event flags."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad2F.asm"
+    },
+    "sourceFile": "pokemon-game-data/scripts/VictoryRoad2F.asm",
+    "sourceLabel": "VictoryRoad2FDefaultScript",
+    "sourceMissableObject": "",
+    "targetFamily": "victory_road",
+    "version": 1,
+    "x": 1,
+    "y": 16
+  },
+  {
+    "confidence": "adapter",
+    "destinationMapName": "",
+    "destinationMissableObject": "",
+    "dropsThroughHole": false,
+    "flag": "EVENT_VICTORY_ROAD_2_BOULDER_ON_SWITCH2",
+    "kind": "boulderTarget",
+    "mapName": "VictoryRoad2F",
+    "source": {
+      "adapter": "victory_road_boulder_target_v1",
+      "mapName": "VictoryRoad2F",
+      "notes": [
+        "sourceBlock=VictoryRoad2FDefaultScript",
+        "sourceCoords=.SwitchCoords",
+        "Generated from CheckBoulderCoords switch/hole target tables and source event flags."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad2F.asm"
+    },
+    "sourceFile": "pokemon-game-data/scripts/VictoryRoad2F.asm",
+    "sourceLabel": "VictoryRoad2FDefaultScript",
+    "sourceMissableObject": "",
+    "targetFamily": "victory_road",
+    "version": 1,
+    "x": 9,
+    "y": 16
+  },
+  {
+    "confidence": "adapter",
+    "destinationMapName": "",
+    "destinationMissableObject": "",
+    "dropsThroughHole": false,
+    "flag": "EVENT_VICTORY_ROAD_3_BOULDER_ON_SWITCH1",
+    "kind": "boulderTarget",
+    "mapName": "VictoryRoad3F",
+    "source": {
+      "adapter": "victory_road_boulder_target_v1",
+      "mapName": "VictoryRoad3F",
+      "notes": [
+        "sourceBlock=VictoryRoad3FDefaultScript",
+        "sourceCoords=.SwitchOrHoleCoords",
+        "Generated from CheckBoulderCoords switch/hole target tables and source event flags."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad3F.asm"
+    },
+    "sourceFile": "pokemon-game-data/scripts/VictoryRoad3F.asm",
+    "sourceLabel": "VictoryRoad3FDefaultScript",
+    "sourceMissableObject": "",
+    "targetFamily": "victory_road",
+    "version": 1,
+    "x": 3,
+    "y": 5
+  },
+  {
+    "confidence": "adapter",
+    "destinationMapName": "VictoryRoad2F",
+    "destinationMissableObject": "HS_VICTORY_ROAD_2F_BOULDER",
+    "dropsThroughHole": true,
+    "flag": "EVENT_VICTORY_ROAD_3_BOULDER_ON_SWITCH2",
+    "kind": "boulderTarget",
+    "mapName": "VictoryRoad3F",
+    "source": {
+      "adapter": "victory_road_boulder_target_v1",
+      "mapName": "VictoryRoad3F",
+      "notes": [
+        "sourceBlock=VictoryRoad3FDefaultScript",
+        "sourceCoords=.SwitchOrHoleCoords",
+        "Generated from CheckBoulderCoords switch/hole target tables and source event flags.",
+        "This target drops the boulder through a source hole and swaps missable objects."
+      ],
+      "scriptPath": "pokemon-game-data/scripts/VictoryRoad3F.asm"
+    },
+    "sourceFile": "pokemon-game-data/scripts/VictoryRoad3F.asm",
+    "sourceLabel": "VictoryRoad3FDefaultScript",
+    "sourceMissableObject": "HS_VICTORY_ROAD_3F_BOULDER",
+    "targetFamily": "victory_road",
+    "version": 1,
+    "x": 23,
+    "y": 15
+  }
+]
