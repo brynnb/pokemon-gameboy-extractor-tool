@@ -450,43 +450,6 @@ cd pokemon-phaser && npm run build
 
 ## Maintenance Roadmap
 
-### Centralize Shared Configuration
-
-Shared extractor paths and constants live in `export_scripts/config.py`.
-Exporter scripts should import from that module rather than redefining repo
-roots, database paths, source-data folders, output paths, batch sizes, or
-tileset aliases locally.
-
-Centralized values include:
-
-- `PROJECT_ROOT`
-- `DB_PATH`
-- `GAME_DATA_ROOT`
-- source subdirectories
-- generated tile image paths
-- viewer output paths
-- JSON output paths
-- `BATCH_SIZE`
-- known tileset aliases such as DOJO/GYM, MART/POKECENTER, and shared
-  blockset/graphics remaps
-
-### Share Tileset Helpers
-
-Shared tile/block helpers live in `export_scripts/tile_helpers.py`.
-`export_map.py` and `create_zones_and_tiles.py` import this module for fixed
-size `.bst`/`.2bpp` parsing, 2bpp tile decoding, Game Boy palette rendering,
-tile image hashing, quadrant rendering, and scaled preview drawing.
-
-### Add Prerequisite Checks To Individual Scripts
-
-The full pipeline runs scripts in the correct order, but individual scripts are
-easy to run out of order while debugging. Dependent scripts should check their
-required tables and print a useful error that points back to `npm run export`.
-
-### Improve Logging
-
-Most scripts still use plain `print()` calls. A shared logging helper would make
-normal output quieter while preserving debug detail when a pipeline step fails.
 
 ### Keep Script Candidate Coverage Auditable
 
@@ -499,25 +462,9 @@ coverage regressions. Future adapters should:
 - include enough JSON detail for downstream importers to understand what source
   concept was detected
 
-### Add More Focused Tests
-
-Useful additions:
-
-- 2bpp decoding tests
-- map connection offset tests
-- overworld coordinate stitching tests
-- tile image generation/deduplication tests
-- representative script adapter tests with current golden diagnostics
-
-### Make Schema Docs Easier To Refresh
-
-The table catalogue above is manually written from the current generated
-database. A small docs helper could regenerate it from `pokemon.db` when the
-pipeline changes.
 
 ### Lower Priority Ideas
 
-- Add an explicit dry-run mode for parser development.
 - Batch large database inserts consistently.
 - Add optional progress bars for long-running loops.
 - Improve error recovery so one malformed source block can be reported without
