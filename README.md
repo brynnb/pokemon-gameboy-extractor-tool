@@ -90,11 +90,10 @@ npm run export
 
 That runs `export_scripts/reprocess.py`.
 
-## Offline Viewer
+## World Viewer
 
 The Phaser viewer inspects generated maps, tiles, items, NPCs, and warps from
-static JSON/assets. It does not need a separate app server or an open SQLite
-connection.
+static JSON/assets.
 
 Run the viewer:
 
