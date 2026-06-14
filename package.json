@@ -1,27 +1,16 @@
 {
     "name": "pokemon-gameboy-extractor-tool",
     "version": "1.0.0",
-    "description": "Pokemon Red/Blue data extractor and lightweight Phaser viewer",
-    "main": "server/server.js",
+    "description": "Pokemon Red/Blue data extractor and offline Phaser viewer",
     "scripts": {
-        "generate": "./scripts/generate.sh",
+        "generate": "./generate.sh",
         "export": "python3 export_scripts/reprocess.py",
         "export:script-candidates": "python3 export_scripts/export_script_candidates.py",
-        "start": "node server/server.js",
-        "dev": "nodemon server/server.js",
-        "client": "cd pokemon-phaser && npm run dev",
-        "start:all": "node start-dev.js",
-        "postinstall": "git submodule update --init --recursive"
+        "viewer": "cd pokemon-phaser && npm run dev",
+        "viewer:build": "cd pokemon-phaser && npm run build",
+        "start": "npm run viewer",
+        "postinstall": "git submodule update --init --recursive && npm --prefix pokemon-phaser install"
     },
     "author": "",
-    "license": "MIT",
-    "dependencies": {
-        "cors": "^2.8.5",
-        "express": "^4.21.2",
-        "sqlite3": "^5.1.7",
-        "ws": "^8.18.1"
-    },
-    "devDependencies": {
-        "nodemon": "^3.1.0"
-    }
+    "license": "MIT"
 }

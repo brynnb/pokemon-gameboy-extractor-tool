@@ -7,11 +7,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from config import SCRIPTS_DIR, TEXT_DIR
 from export_map_scripts import parse_spin_tiles
 from export_script_candidates import (
     badge_gated_gym_guide_candidates,
     badge_or_event_gated_dialogue_candidates,
     bills_house_cell_separator_candidates,
+    boulder_target_runtime_diagnostics,
     cerulean_city_rival_candidates,
     champion_hall_of_fame_runtime_diagnostics,
     capturequest_authored_runtime_diagnostics,
@@ -19,10 +21,13 @@ from export_script_candidates import (
     cinnabar_gym_map_load_reset_candidate,
     cinnabar_gym_trainer_text_candidates,
     conditional_flag_map_script_candidates,
+    conditional_dialogue_rows,
     daycare_runtime_diagnostic,
     diagnostic_for_ir_block,
     extract_features,
     extract_label_blocks,
+    extract_script_ir,
+    parse_text_pointer_map,
     elite_four_room_entrance_guard_candidates,
     fan_boast_toggle_candidates,
     facing_up_dialogue_candidates,
@@ -65,17 +70,69 @@ from export_script_candidates import (
     silph_co_9f_nurse_candidates,
     simple_flag_side_effect_dialogue_candidates,
     snorlax_wake_battle_candidates,
+    SCRIPTS_DIR,
     spin_tile_runtime_diagnostics,
+    strip_comment,
     trainer_after_battle_flag_runtime_diagnostics,
     trainer_after_battle_flag_side_effect_candidates,
     trainer_after_battle_object_drop_candidates,
+    text_asm_text_pointer_diagnostics,
     viridian_city_progress_blocker_candidates,
     viridian_old_man_catch_tutorial_candidate,
     vermilion_ss_anne_guard_candidates,
     victory_road_boulder_target_definitions,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+def assert_dialogue_contains(testcase, lines, fragment):
+    testcase.assertTrue(
+        any(fragment in line for line in lines),
+        f"{fragment!r} not found in dialogue pages: {lines!r}",
+    )
+
+
+def generated_label_coverage_for_tests():
+    from export_script_candidates import ADAPTERS, TILE_OVERRIDE_ADAPTERS
+
+    candidates = []
+    for adapter in ADAPTERS:
+        candidates.extend(adapter())
+    tile_candidates = []
+    for adapter in TILE_OVERRIDE_ADAPTERS:
+        tile_candidates.extend(adapter())
+    trades = in_game_trade_definitions()
+    conditional_rows = conditional_dialogue_rows()
+
+    labels = {candidate["scriptLabel"] for candidate in candidates}
+    labels.update(candidate.get("trigger", {}).get("sourceLabel", "") for candidate in candidates)
+    for candidate in candidates:
+        labels.update(candidate.get("source", {}).get("coveredLabels", []))
+    labels.update(trade["scriptLabel"] for trade in trades if trade.get("scriptLabel"))
+    labels.update(candidate["scriptLabel"] for candidate in tile_candidates)
+    for candidate in tile_candidates:
+        labels.update(candidate.get("source", {}).get("coveredLabels", []))
+    labels.update(row["scriptLabel"] for row in conditional_rows)
+    labels.update(row.get("sourceScriptLabel", "") for row in conditional_rows)
+    for row in conditional_rows:
+        labels.update(row.get("source", {}).get("coveredLabels", []))
+
+    boulder_targets = victory_road_boulder_target_definitions()
+    diagnostic_groups = [
+        boulder_target_runtime_diagnostics(boulder_targets),
+        trainer_after_battle_flag_runtime_diagnostics(),
+        champion_hall_of_fame_runtime_diagnostics(),
+        oak_intro_runtime_diagnostics(),
+        capturequest_authored_runtime_diagnostics(),
+        pallet_daisy_map_load_runtime_diagnostics(),
+        pokemon_tower7f_rocket_exit_runtime_diagnostics(),
+        cinnabar_gym_default_runtime_diagnostics(),
+        name_rater_runtime_diagnostics(),
+    ]
+    for diagnostics in diagnostic_groups:
+        for diagnostic in diagnostics:
+            if diagnostic["status"] in {"covered", "generated"}:
+                labels.add(diagnostic["scriptLabel"])
+                labels.update(diagnostic.get("details", {}).get("source", {}).get("coveredLabels", []))
+    return labels
 
 
 class InGameTradeDiagnosticTest(unittest.TestCase):
@@ -270,8 +327,8 @@ SilphCo1F_Script:
 
         candidates = one_shot_object_visibility_map_script_candidate_for_block(
             "SilphCo1F",
-            PROJECT_ROOT / "pokemon-game-data/scripts/SilphCo1F.asm",
-            PROJECT_ROOT / "pokemon-game-data/text/SilphCo1F.asm",
+            SCRIPTS_DIR / "SilphCo1F.asm",
+            TEXT_DIR / "SilphCo1F.asm",
             block,
         )
 
@@ -319,8 +376,8 @@ Route25ShowHideBillScript:
 
         candidates = one_shot_object_visibility_map_script_candidate_for_block(
             "Route25",
-            PROJECT_ROOT / "pokemon-game-data/scripts/Route25.asm",
-            PROJECT_ROOT / "pokemon-game-data/text/Route25.asm",
+            SCRIPTS_DIR / "Route25.asm",
+            TEXT_DIR / "Route25.asm",
             block,
         )
 
@@ -345,7 +402,7 @@ class SnorlaxWakeBattleCandidatesTest(unittest.TestCase):
             "requiresEventAbsent": "EVENT_BEAT_ROUTE12_SNORLAX",
         })
         self.assertEqual(route12["actions"][1]["type"], "dialogue")
-        self.assertIn("SNORLAX woke up!", route12["actions"][1]["lines"])
+        assert_dialogue_contains(self, route12["actions"][1]["lines"], "SNORLAX woke up!")
         battle = route12["actions"][3]
         self.assertEqual(battle["type"], "startWildBattle")
         self.assertEqual(battle["pokemonConstant"], "SNORLAX")
@@ -378,15 +435,15 @@ class PokemonTowerMarowakGhostCandidateTest(unittest.TestCase):
         self.assertEqual(candidate["trigger"]["label"], "PokemonTower6FMarowakCoords")
         self.assertEqual(candidate["trigger"]["coordinates"], [{"x": 10, "y": 16}])
         self.assertEqual(candidate["conditions"], {"requiresEventAbsent": "EVENT_BEAT_GHOST_MAROWAK"})
-        self.assertEqual(candidate["actions"][1], {"type": "dialogue", "lines": ["Be gone...", "Intruders..."]})
+        self.assertEqual(candidate["actions"][1], {"type": "dialogue", "lines": ["Be gone...\nIntruders..."]})
 
         battle = candidate["actions"][3]
         self.assertEqual(battle["type"], "startWildBattle")
         self.assertEqual(battle["pokemonConstant"], "MAROWAK")
         self.assertEqual(battle["level"], 30)
         self.assertEqual(battle["winFlag"], "EVENT_BEAT_GHOST_MAROWAK")
-        self.assertIn("The GHOST was the", battle["postWinActions"][0]["lines"])
-        self.assertIn("It departed to", battle["postWinActions"][0]["lines"])
+        assert_dialogue_contains(self, battle["postWinActions"][0]["lines"], "The GHOST was the")
+        assert_dialogue_contains(self, battle["postWinActions"][0]["lines"], "It departed to")
         self.assertEqual(candidate["source"]["adapter"], "pokemon_tower_marowak_ghost_v1")
         self.assertIn("PokemonTower6FDefaultScript", candidate["source"]["coveredLabels"])
         self.assertIn("PokemonTower6FMarowakBattleScript", candidate["source"]["coveredLabels"])
@@ -413,7 +470,7 @@ class ViridianOldManCatchTutorialCandidateTest(unittest.TestCase):
         self.assertEqual(battle["type"], "startWildBattle")
         self.assertEqual(battle["pokemonConstant"], "WEEDLE")
         self.assertEqual(battle["level"], 5)
-        self.assertIn("First, you need", battle["postWinActions"][0]["lines"])
+        assert_dialogue_contains(self, battle["postWinActions"][0]["lines"], "First, you need")
         self.assertEqual(candidate["source"]["adapter"], "viridian_old_man_catch_tutorial_v1")
         self.assertIn("ViridianCityOldManEndCatchTrainingScript", candidate["source"]["coveredLabels"])
 
@@ -428,7 +485,7 @@ class BadgeOrEventGatedDialogueCandidateTest(unittest.TestCase):
         badge = candidates["ViridianCityGambler1TextEarthBadgeSet"]
         self.assertEqual(badge["trigger"]["label"], "TEXT_VIRIDIANCITY_GAMBLER1")
         self.assertEqual(badge["conditions"], {"requiresBadge": "EARTHBADGE"})
-        self.assertEqual(badge["actions"][1]["lines"], ["VIRIDIAN GYM's", "LEADER returned!"])
+        self.assertEqual(badge["actions"][1]["lines"], ["VIRIDIAN GYM's\nLEADER returned!"])
 
         giovanni = candidates["ViridianCityGambler1TextEventBeatViridianGymGiovanniSetEarthBadgeAbsent"]
         self.assertEqual(
@@ -448,7 +505,10 @@ class BadgeOrEventGatedDialogueCandidateTest(unittest.TestCase):
                 "requiresBadgesAbsent": ["EARTHBADGE"],
             },
         )
-        self.assertEqual(closed["actions"][1]["lines"], ["This POKEMON GYM", "is always closed.", "I wonder who the", "LEADER is?"])
+        self.assertEqual(
+            closed["actions"][1]["lines"],
+            ["This POKEMON GYM\nis always closed.", "I wonder who the\nLEADER is?"],
+        )
         self.assertEqual(closed["source"]["adapter"], "badge_or_event_gated_dialogue_v1")
 
 
@@ -500,7 +560,7 @@ class SpinTileDiagnosticsTest(unittest.TestCase):
 
 class DayCareRuntimeDiagnosticTest(unittest.TestCase):
     def test_daycare_gentleman_is_runtime_covered(self):
-        script_path = PROJECT_ROOT / "pokemon-game-data/scripts/Daycare.asm"
+        script_path = SCRIPTS_DIR / "Daycare.asm"
         blocks = {block["label"]: block for block in extract_label_blocks(script_path.read_text())}
         block = blocks["DaycareGentlemanText"]
         ir = extract_features(block["label"], block["raw"])
@@ -587,9 +647,9 @@ class PewterCityEscortCandidateTest(unittest.TestCase):
         self.assertEqual(choice["type"], "choice")
         self.assertTrue(choice["stopOnYes"])
         self.assertTrue(choice["continueOnNo"])
-        self.assertIn("Did you check out", choice["promptLines"])
-        self.assertIn("Weren't those", choice["yesLines"])
-        self.assertIn("Really?", choice["noLines"])
+        assert_dialogue_contains(self, choice["promptLines"], "Did you check out")
+        assert_dialogue_contains(self, choice["yesLines"], "Weren't those")
+        assert_dialogue_contains(self, choice["noLines"], "Really?")
         self.assertEqual(museum["actions"][2], {"type": "move", "actor": "SUPER_NERD", "movements": ["DOWN", "DOWN", "DOWN", "DOWN"]})
         self.assertEqual(museum["actions"][4], {"type": "hideObject", "objectKey": "HS_MUSEUM_GUY"})
         self.assertIn("PewterCityHideSuperNerd1Script", museum["source"]["coveredLabels"])
@@ -612,7 +672,7 @@ class PewterCityEscortCandidateTest(unittest.TestCase):
 
 class TextPointerSwitchRuntimeDiagnosticTest(unittest.TestCase):
     def test_viridian_mart_parcel_text_pointer_switch_is_runtime_covered(self):
-        script_path = PROJECT_ROOT / "pokemon-game-data/scripts/ViridianMart.asm"
+        script_path = SCRIPTS_DIR / "ViridianMart.asm"
         blocks = {block["label"]: block for block in extract_label_blocks(script_path.read_text())}
         block = blocks["ViridianMartCheckParcelDeliveredScript"]
         ir = extract_features(block["label"], block["raw"])
@@ -632,7 +692,7 @@ class TextPointerSwitchRuntimeDiagnosticTest(unittest.TestCase):
 
 class SeafoamRuntimeDiagnosticTest(unittest.TestCase):
     def test_seafoam_boulder_map_script_is_runtime_covered(self):
-        script_path = PROJECT_ROOT / "pokemon-game-data/scripts/SeafoamIslands1F.asm"
+        script_path = SCRIPTS_DIR / "SeafoamIslands1F.asm"
         blocks = {block["label"]: block for block in extract_label_blocks(script_path.read_text())}
         block = blocks["SeafoamIslands1F_Script"]
         ir = extract_features(block["label"], block["raw"])
@@ -647,7 +707,7 @@ class SeafoamRuntimeDiagnosticTest(unittest.TestCase):
         self.assertIn("seafoam_currents", diagnostic["details"]["source"]["runtimeConcepts"])
 
     def test_route20_seafoam_reset_script_is_runtime_covered(self):
-        script_path = PROJECT_ROOT / "pokemon-game-data/scripts/Route20.asm"
+        script_path = SCRIPTS_DIR / "Route20.asm"
         blocks = {block["label"]: block for block in extract_label_blocks(script_path.read_text())}
         block = blocks["Route20_Script"]
         ir = extract_features(block["label"], block["raw"])
@@ -663,7 +723,7 @@ class SeafoamRuntimeDiagnosticTest(unittest.TestCase):
 
 class NPCFacePlayerRuntimeDiagnosticTest(unittest.TestCase):
     def test_ss_anne_captain_face_player_flag_is_runtime_covered(self):
-        script_path = PROJECT_ROOT / "pokemon-game-data/scripts/SSAnneCaptainsRoom.asm"
+        script_path = SCRIPTS_DIR / "SSAnneCaptainsRoom.asm"
         blocks = {block["label"]: block for block in extract_label_blocks(script_path.read_text())}
         block = blocks["SSAnneCaptainsRoomEventScript"]
         ir = extract_features(block["label"], block["raw"])
@@ -887,12 +947,12 @@ class SplitTextFileCandidateTest(unittest.TestCase):
         viridian_before = candidates["ViridianGymGymGuideTextEventBeatViridianGymGiovanniAbsent"]
 
         self.assertEqual(game_corner_after["conditions"], {"requiresEvent": "EVENT_BEAT_ERIKA"})
-        self.assertIn("They offer rare", game_corner_after["actions"][1]["lines"])
+        assert_dialogue_contains(self, game_corner_after["actions"][1]["lines"], "They offer rare")
         self.assertEqual(
             viridian_before["conditions"],
             {"requiresEventAbsent": "EVENT_BEAT_VIRIDIAN_GYM_GIOVANNI"},
         )
-        self.assertIn("Yo! Champ in", viridian_before["actions"][1]["lines"])
+        assert_dialogue_contains(self, viridian_before["actions"][1]["lines"], "Yo! Champ in")
 
     def test_flag_gated_dialogue_leaves_rival_state_machines_for_bespoke_adapters(self):
         labels = {
@@ -902,6 +962,167 @@ class SplitTextFileCandidateTest(unittest.TestCase):
 
         self.assertNotIn("CeruleanCityRivalTextEventBeatCeruleanRivalAbsent", labels)
         self.assertNotIn("Route22Rival1TextEventBeatRoute22Rival1stBattleAbsent", labels)
+
+
+class ConditionalDialogueRowTest(unittest.TestCase):
+    def test_oaks_lab_rival_nested_state_machine_emits_conditional_dialogue(self):
+        rows = [
+            row
+            for row in conditional_dialogue_rows()
+            if row["textConstant"] == "TEXT_OAKSLAB_RIVAL"
+        ]
+
+        self.assertEqual(len(rows), 3)
+        by_priority = {row["priority"]: row for row in rows}
+
+        self.assertEqual(
+            by_priority[300]["conditions"],
+            {
+                "requiresEvents": [],
+                "requiresEventsAbsent": ["EVENT_FOLLOWED_OAK_INTO_LAB_2"],
+            },
+        )
+        self.assertEqual(
+            by_priority[300]["dialogueLabels"],
+            ["_OaksLabRivalGrampsIsntAroundText"],
+        )
+        self.assertEqual(
+            by_priority[200]["conditions"],
+            {
+                "requiresEvents": ["EVENT_FOLLOWED_OAK_INTO_LAB_2", "EVENT_GOT_STARTER"],
+                "requiresEventsAbsent": [],
+            },
+        )
+        self.assertEqual(
+            by_priority[200]["dialogueLabels"],
+            ["_OaksLabRivalMyPokemonLooksStrongerText"],
+        )
+        self.assertEqual(
+            by_priority[100]["conditions"],
+            {
+                "requiresEvents": ["EVENT_FOLLOWED_OAK_INTO_LAB_2"],
+                "requiresEventsAbsent": ["EVENT_GOT_STARTER"],
+            },
+        )
+        self.assertEqual(
+            by_priority[100]["dialogueLabels"],
+            ["_OaksLabRivalGoAheadAndChooseText"],
+        )
+
+    def test_simple_flag_gated_dialogue_emits_conditional_dialogue(self):
+        rows = [
+            row
+            for row in conditional_dialogue_rows()
+            if row["textConstant"] == "TEXT_GAMECORNER_GYM_GUIDE"
+        ]
+
+        self.assertEqual(len(rows), 2)
+        by_priority = {row["priority"]: row for row in rows}
+        self.assertEqual(by_priority[20]["conditions"], {
+            "requiresEvents": ["EVENT_BEAT_ERIKA"],
+            "requiresEventsAbsent": [],
+        })
+        self.assertIn("_GameCornerGymGuideTheyOfferRarePokemonText", by_priority[20]["dialogueLabels"])
+        self.assertEqual(by_priority[10]["conditions"], {
+            "requiresEvents": [],
+            "requiresEventsAbsent": ["EVENT_BEAT_ERIKA"],
+        })
+
+
+class TextAsmPointerDiagnosticTest(unittest.TestCase):
+    def test_single_text_asm_pointer_is_classified_as_direct_text_coverage(self):
+        labels = generated_label_coverage_for_tests()
+        diagnostics = {
+            (diagnostic["mapName"], diagnostic["scriptLabel"]): diagnostic
+            for diagnostic in text_asm_text_pointer_diagnostics(labels)
+        }
+
+        diagnostic = diagnostics[("BikeShop", "BikeShopMiddleAgedWomanText")]
+        self.assertEqual(diagnostic["status"], "covered")
+        self.assertEqual(diagnostic["reason"], "direct_text_pointer_v1")
+        self.assertEqual(diagnostic["details"]["textConstant"], "TEXT_BIKESHOP_MIDDLE_AGED_WOMAN")
+        self.assertEqual(diagnostic["details"]["textRefs"], ["BikeShopMiddleAgedWomanText"])
+
+    def test_single_text_asm_label_is_classified_as_direct_text_coverage(self):
+        labels = generated_label_coverage_for_tests()
+        diagnostics = {
+            (diagnostic["mapName"], diagnostic["scriptLabel"]): diagnostic
+            for diagnostic in text_asm_text_pointer_diagnostics(labels)
+        }
+
+        diagnostic = diagnostics[("CeruleanCaveB1F", "MewtwoBattleText")]
+        self.assertEqual(diagnostic["status"], "covered")
+        self.assertEqual(diagnostic["reason"], "direct_text_label_v1")
+        self.assertEqual(diagnostic["details"]["textConstant"], "")
+        self.assertEqual(diagnostic["details"]["textRefs"], ["MewtwoBattleText"])
+
+    def test_multi_branch_text_asm_pointer_is_review_diagnostic(self):
+        labels = generated_label_coverage_for_tests()
+        diagnostics = {
+            (diagnostic["mapName"], diagnostic["scriptLabel"]): diagnostic
+            for diagnostic in text_asm_text_pointer_diagnostics(labels)
+        }
+
+        diagnostic = diagnostics[("CeladonMansion3F", "CeladonMansion3FGameDesignerText")]
+        self.assertEqual(diagnostic["status"], "unsupported")
+        self.assertEqual(diagnostic["reason"], "text_asm_multi_text_branch")
+        self.assertEqual(diagnostic["details"]["textConstant"], "TEXT_CELADONMANSION3F_GAME_DESIGNER")
+        self.assertEqual(
+            diagnostic["details"]["textRefs"],
+            [
+                "CeladonMansion3FGameDesignerText",
+                "CeladonMansion3FGameDesignerCompletedDexText",
+            ],
+        )
+
+    def test_every_text_asm_text_pointer_is_classified(self):
+        labels = generated_label_coverage_for_tests()
+        pointer_diagnostics = {
+            (diagnostic["mapName"], diagnostic["scriptLabel"])
+            for diagnostic in text_asm_text_pointer_diagnostics(labels)
+        }
+
+        unclassified = []
+        for script_path in sorted(SCRIPTS_DIR.glob("*.asm")):
+            map_name = script_path.stem
+            script_content = script_path.read_text()
+            text_pointers = parse_text_pointer_map(script_content)
+            blocks = {block["label"]: block for block in extract_label_blocks(script_content)}
+            for label in sorted(text_pointers):
+                block = blocks.get(label)
+                if not block:
+                    continue
+                clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+                if "text_asm" not in clean:
+                    continue
+                if label in labels or (map_name, label) in pointer_diagnostics:
+                    continue
+                ir = extract_features(label, block["raw"])
+                ir["mapName"] = map_name
+                if diagnostic_for_ir_block(ir, labels):
+                    continue
+                unclassified.append(f"{map_name}.{label}")
+
+        self.assertEqual(unclassified, [])
+
+    def test_every_text_asm_block_is_classified(self):
+        labels = generated_label_coverage_for_tests()
+        text_asm_diagnostics = {
+            (diagnostic["mapName"], diagnostic["scriptLabel"])
+            for diagnostic in text_asm_text_pointer_diagnostics(labels)
+        }
+
+        unclassified = []
+        for block in extract_script_ir():
+            if not block["features"]["hasTextAsm"]:
+                continue
+            if block["label"] in labels or (block["mapName"], block["label"]) in text_asm_diagnostics:
+                continue
+            if diagnostic_for_ir_block(block, labels):
+                continue
+            unclassified.append(f"{block['mapName']}.{block['label']}")
+
+        self.assertEqual(unclassified, [])
 
 
 class FacingUpDialogueCandidateTest(unittest.TestCase):
@@ -917,13 +1138,13 @@ class FacingUpDialogueCandidateTest(unittest.TestCase):
 
         self.assertEqual(snorlax["conditions"]["requiresPlayerFacing"], "UP")
         self.assertEqual(snorlax["conditions"]["requiresEventAbsent"], "EVENT_BEAT_ROUTE12_SNORLAX")
-        self.assertIn("A big POKEMON is", snorlax["actions"][1]["lines"])
-        self.assertIn("asleep on a road!", snorlax["actions"][1]["lines"])
+        assert_dialogue_contains(self, snorlax["actions"][1]["lines"], "A big POKEMON is")
+        assert_dialogue_contains(self, snorlax["actions"][1]["lines"], "asleep on a road!")
 
         self.assertEqual(clear["conditions"]["requiresPlayerFacing"], "UP")
         self.assertEqual(clear["conditions"]["requiresEvent"], "EVENT_BEAT_ROUTE12_SNORLAX")
-        self.assertIn("It's a beautiful", clear["actions"][1]["lines"])
-        self.assertIn("view!", clear["actions"][1]["lines"])
+        assert_dialogue_contains(self, clear["actions"][1]["lines"], "It's a beautiful")
+        assert_dialogue_contains(self, clear["actions"][1]["lines"], "view!")
 
 
 class PokemonMansionSwitchCandidateTest(unittest.TestCase):
@@ -947,9 +1168,9 @@ class PokemonMansionSwitchCandidateTest(unittest.TestCase):
         basement = candidates["PokemonMansionB1FSwitchToggle"]
 
         self.assertEqual(first_floor["trigger"]["label"], "TEXT_POKEMONMANSION1F_SWITCH")
-        self.assertIn("A secret switch!", first_floor["actions"][1]["promptLines"])
-        self.assertIn("Who wouldn't?", first_floor["actions"][1]["yesLines"])
-        self.assertIn("Not quite yet!", first_floor["actions"][1]["noLines"])
+        assert_dialogue_contains(self, first_floor["actions"][1]["promptLines"], "A secret switch!")
+        assert_dialogue_contains(self, first_floor["actions"][1]["yesLines"], "Who wouldn't?")
+        assert_dialogue_contains(self, first_floor["actions"][1]["noLines"], "Not quite yet!")
         self.assertEqual(first_floor["actions"][2], {"type": "toggleEvent", "event": "EVENT_MANSION_SWITCH_ON"})
 
         self.assertEqual(basement["mapName"], "PokemonMansionB1F")
@@ -1029,11 +1250,11 @@ class BadgeGatedGymGuideCandidateTest(unittest.TestCase):
 
         self.assertEqual(before["conditions"], {"requiresBadgeAbsent": "BOULDERBADGE"})
         self.assertEqual(before["actions"][1]["type"], "choice")
-        self.assertIn("Let me take you", before["actions"][1]["promptLines"])
-        self.assertIn("All right! Let's", before["actions"][1]["yesLines"])
-        self.assertIn("It's a free", before["actions"][1]["noLines"])
+        assert_dialogue_contains(self, before["actions"][1]["promptLines"], "Let me take you")
+        assert_dialogue_contains(self, before["actions"][1]["yesLines"], "All right! Let's")
+        assert_dialogue_contains(self, before["actions"][1]["noLines"], "It's a free")
         self.assertEqual(after["conditions"], {"requiresBadge": "BOULDERBADGE"})
-        self.assertIn("Just as I thought!", after["actions"][1]["lines"])
+        assert_dialogue_contains(self, after["actions"][1]["lines"], "Just as I thought!")
 
     def test_vermilion_gym_guide_emits_badge_gated_dialogue(self):
         candidates = {
@@ -1045,9 +1266,9 @@ class BadgeGatedGymGuideCandidateTest(unittest.TestCase):
         after = candidates["VermilionGymGymGuideTextThunderBadgeSet"]
 
         self.assertEqual(before["conditions"], {"requiresBadgeAbsent": "THUNDERBADGE"})
-        self.assertIn("Yo! Champ in", before["actions"][1]["lines"])
+        assert_dialogue_contains(self, before["actions"][1]["lines"], "Yo! Champ in")
         self.assertEqual(after["conditions"], {"requiresBadge": "THUNDERBADGE"})
-        self.assertIn("Whew! That match", after["actions"][1]["lines"])
+        assert_dialogue_contains(self, after["actions"][1]["lines"], "Whew! That match")
 
 
 class VermilionSSAnneGuardCandidateTest(unittest.TestCase):
@@ -1078,15 +1299,15 @@ class VermilionSSAnneGuardCandidateTest(unittest.TestCase):
                 "requiresItem": "S_S_TICKET",
             },
         )
-        self.assertIn("Welcome to S.S.", passed["actions"][1]["lines"])
-        self.assertIn("(PLAYER) flashed", passed["actions"][1]["lines"])
-        self.assertIn("the S.S.TICKET!", passed["actions"][1]["lines"])
+        assert_dialogue_contains(self, passed["actions"][1]["lines"], "Welcome to S.S.")
+        assert_dialogue_contains(self, passed["actions"][1]["lines"], "(PLAYER) flashed")
+        assert_dialogue_contains(self, passed["actions"][1]["lines"], "the S.S.TICKET!")
         self.assertEqual(passed["source"]["adapter"], "vermilion_ss_anne_guard_v1")
 
         no_ticket = candidates["VermilionCitySSAnneGuardNoTicketBlocked"]
         self.assertEqual(no_ticket["conditions"]["requiresItemAbsent"], "S_S_TICKET")
         self.assertEqual(no_ticket["actions"][2], {"type": "movePlayer", "movements": ["UP"]})
-        self.assertIn("You need a ticket", no_ticket["actions"][1]["lines"])
+        assert_dialogue_contains(self, no_ticket["actions"][1]["lines"], "You need a ticket")
 
         departed = candidates["VermilionCitySSAnneGuardShipDepartedBlocked"]
         self.assertEqual(
@@ -1097,7 +1318,7 @@ class VermilionSSAnneGuardCandidateTest(unittest.TestCase):
             },
         )
         self.assertEqual(departed["actions"][2], {"type": "movePlayer", "movements": ["UP"]})
-        self.assertIn("The ship set sail.", departed["actions"][1]["lines"])
+        assert_dialogue_contains(self, departed["actions"][1]["lines"], "The ship set sail.")
 
 
 class ViridianCityProgressBlockerCandidateTest(unittest.TestCase):
@@ -1133,14 +1354,14 @@ class ViridianCityProgressBlockerCandidateTest(unittest.TestCase):
             gym_blocked["conditions"],
             {"requiresEventsAbsent": ["EVENT_VIRIDIAN_GYM_OPEN", "EVENT_GOT_EARTHBADGE"]},
         )
-        self.assertIn("The GYM's doors", gym_blocked["actions"][1]["lines"])
+        assert_dialogue_contains(self, gym_blocked["actions"][1]["lines"], "The GYM's doors")
         self.assertEqual(gym_blocked["actions"][2], {"type": "movePlayer", "movements": ["DOWN"]})
 
         old_man = candidates["ViridianCityOldManSleepyBlocked"]
         self.assertEqual(old_man["trigger"]["label"], "ViridianCityOldManSleepyCoords")
         self.assertEqual(old_man["trigger"]["coordinates"], [{"mapName": "ViridianCity", "x": 19, "y": 9}])
         self.assertEqual(old_man["conditions"], {"requiresEventAbsent": "EVENT_GOT_POKEDEX"})
-        self.assertIn("You can't go", old_man["actions"][1]["lines"])
+        assert_dialogue_contains(self, old_man["actions"][1]["lines"], "You can't go")
         self.assertEqual(old_man["actions"][2], {"type": "movePlayer", "movements": ["DOWN"]})
         self.assertEqual(old_man["source"]["adapter"], "viridian_city_progress_blocker_v1")
         self.assertIn("ViridianCityCheckGymOpenScript", old_man["source"]["coveredLabels"])
@@ -1276,7 +1497,7 @@ class FightingDojoKarateMasterCandidateTest(unittest.TestCase):
         battle = candidates["FightingDojoKarateMasterBattle"]
         self.assertEqual(battle["trigger"]["label"], "TEXT_FIGHTINGDOJO_KARATE_MASTER")
         self.assertEqual(battle["conditions"], {"requiresEventAbsent": "EVENT_BEAT_KARATE_MASTER"})
-        self.assertIn("Fwaaa!", battle["actions"][1]["lines"])
+        assert_dialogue_contains(self, battle["actions"][1]["lines"], "Fwaaa!")
         self.assertEqual(battle["actions"][2]["type"], "startTrainerBattle")
         self.assertEqual(battle["actions"][2]["trainerClass"], "BLACKBELT")
         self.assertEqual(battle["actions"][2]["partyIndex"], 1)
@@ -1298,7 +1519,7 @@ class FightingDojoKarateMasterCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_GOT_FIGHTING_DOJO_POKEMON",
             },
         )
-        self.assertIn("Choose whichever", prompt["actions"][1]["lines"])
+        assert_dialogue_contains(self, prompt["actions"][1]["lines"], "Choose whichever")
         self.assertEqual(
             prompt["actions"][2:7],
             [
@@ -1318,11 +1539,11 @@ class FightingDojoKarateMasterCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_GOT_FIGHTING_DOJO_POKEMON",
             },
         )
-        self.assertIn("Choose whichever", reward_click["actions"][1]["lines"])
+        assert_dialogue_contains(self, reward_click["actions"][1]["lines"], "Choose whichever")
 
         stay = candidates["FightingDojoKarateMasterStayAndTrain"]
         self.assertEqual(stay["conditions"], {"requiresEvent": "EVENT_DEFEATED_FIGHTING_DOJO"})
-        self.assertIn("Karate with us!", stay["actions"][1]["lines"])
+        assert_dialogue_contains(self, stay["actions"][1]["lines"], "Karate with us!")
 
 
 class FanBoastToggleCandidateTest(unittest.TestCase):
@@ -1360,8 +1581,8 @@ class GameCornerPosterCandidateTest(unittest.TestCase):
 
         self.assertEqual(poster["trigger"]["label"], "TEXT_GAMECORNER_POSTER")
         self.assertEqual(poster["actions"][2], {"type": "setEvent", "event": "EVENT_FOUND_ROCKET_HIDEOUT"})
-        self.assertIn("A switch behind", poster["actions"][1]["lines"])
-        self.assertIn("the poster!?", poster["actions"][1]["lines"])
+        assert_dialogue_contains(self, poster["actions"][1]["lines"], "A switch behind")
+        assert_dialogue_contains(self, poster["actions"][1]["lines"], "the poster!?")
         self.assertEqual(
             poster["source"]["tileReplacement"],
             {"blockX": 8, "blockY": 2, "blockId": 67, "event": "EVENT_FOUND_ROCKET_HIDEOUT"},
@@ -1410,8 +1631,8 @@ class GameCornerRocketDefeatedCandidateTest(unittest.TestCase):
             },
         )
         self.assertEqual(candidate["actions"][0], {"type": "lockInput"})
-        self.assertIn("Dang!", candidate["actions"][1]["lines"])
-        self.assertIn("Our hideout might", candidate["actions"][1]["lines"])
+        assert_dialogue_contains(self, candidate["actions"][1]["lines"], "Dang!")
+        assert_dialogue_contains(self, candidate["actions"][1]["lines"], "Our hideout might")
         self.assertEqual(
             candidate["actions"][2],
             {"type": "move", "actor": "ROCKET", "movements": ["DOWN", "DOWN", "DOWN", "RIGHT", "RIGHT"]},
@@ -1564,21 +1785,21 @@ class GameCornerCoinPurchaseCandidateTest(unittest.TestCase):
             buy["conditions"],
             {"requiresItem": "COIN_CASE", "requiresCoinsBelow": 9990, "requiresMoney": 1000},
         )
-        self.assertIn("It's 1000 Pokedollars for 50", buy["actions"][1]["promptLines"])
-        self.assertIn("No? Please come", buy["actions"][1]["noLines"])
+        assert_dialogue_contains(self, buy["actions"][1]["promptLines"], "It's 1000 Pokedollars for 50")
+        assert_dialogue_contains(self, buy["actions"][1]["noLines"], "No? Please come")
         self.assertEqual(buy["actions"][2], {"type": "takeMoney", "money": 1000})
         self.assertEqual(buy["actions"][3], {"type": "giveCoins", "coins": 50})
-        self.assertIn("your 50 coins!", buy["actions"][4]["lines"])
+        assert_dialogue_contains(self, buy["actions"][4]["lines"], "your 50 coins!")
 
         self.assertEqual(
             no_money["conditions"],
             {"requiresItem": "COIN_CASE", "requiresCoinsBelow": 9990, "requiresMoneyBelow": 1000},
         )
-        self.assertIn("You can't afford", no_money["actions"][2]["lines"])
+        assert_dialogue_contains(self, no_money["actions"][2]["lines"], "You can't afford")
         self.assertEqual(full["conditions"], {"requiresItem": "COIN_CASE", "requiresCoins": 9990})
-        self.assertIn("CASE is full.", full["actions"][2]["lines"])
+        assert_dialogue_contains(self, full["actions"][2]["lines"], "CASE is full.")
         self.assertEqual(no_case["conditions"], {"requiresItemAbsent": "COIN_CASE"})
-        self.assertIn("COIN CASE!", no_case["actions"][2]["lines"])
+        assert_dialogue_contains(self, no_case["actions"][2]["lines"], "COIN CASE!")
 
 
 class GymLeaderBattleTextCandidateTest(unittest.TestCase):
@@ -1593,14 +1814,25 @@ class GymLeaderBattleTextCandidateTest(unittest.TestCase):
 
         self.assertEqual(before["trigger"]["label"], "TEXT_PEWTERGYM_BROCK")
         self.assertEqual(before["conditions"], {"requiresEventAbsent": "EVENT_BEAT_BROCK"})
-        self.assertIn("I'm BROCK!", before["actions"][1]["lines"])
+        self.assertEqual(
+            before["actions"][1]["lines"],
+            [
+                "I'm BROCK!\nI'm PEWTER's GYM LEADER!",
+                "I believe in rock\nhard defense and determination!",
+                "That's why my\nPOKEMON are all the rock-type!",
+                "Do you still want\nto challenge me? Fine then! Show me your best!",
+            ],
+        )
         self.assertEqual(before["actions"][2]["type"], "startTrainerBattle")
         self.assertEqual(before["actions"][2]["trainerClass"], "BROCK")
         self.assertEqual(before["actions"][2]["partyIndex"], 1)
         self.assertEqual(before["actions"][2]["winFlag"], "EVENT_BEAT_BROCK")
 
         self.assertEqual(after["conditions"], {"requiresEvent": "EVENT_GOT_TM34"})
-        self.assertIn("There are all", after["actions"][1]["lines"])
+        self.assertEqual(
+            after["actions"][1]["lines"][0],
+            "There are all\nkinds of trainers in the world!",
+        )
 
     def test_cinnabar_helper_jump_still_emits_blaine_battle_branch(self):
         candidates = {
@@ -1612,7 +1844,7 @@ class GymLeaderBattleTextCandidateTest(unittest.TestCase):
 
         self.assertEqual(before["trigger"]["label"], "TEXT_CINNABARGYM_BLAINE")
         self.assertEqual(before["conditions"], {"requiresEventAbsent": "EVENT_BEAT_BLAINE"})
-        self.assertIn("Hah!", before["actions"][1]["lines"])
+        assert_dialogue_contains(self, before["actions"][1]["lines"], "Hah!")
         self.assertEqual(before["actions"][2]["trainerClass"], "BLAINE")
         self.assertEqual(before["actions"][2]["partyIndex"], 1)
         self.assertEqual(before["actions"][2]["winFlag"], "EVENT_BEAT_BLAINE")
@@ -1628,13 +1860,16 @@ class GymLeaderBattleTextCandidateTest(unittest.TestCase):
 
         self.assertEqual(before["trigger"]["label"], "TEXT_VERMILIONGYM_LT_SURGE")
         self.assertEqual(before["conditions"], {"requiresEventAbsent": "EVENT_BEAT_LT_SURGE"})
-        self.assertIn("Hey, kid! What do", before["actions"][1]["lines"])
+        self.assertEqual(
+            before["actions"][1]["lines"][0],
+            "Hey, kid! What do\nyou think you're doing here?",
+        )
         self.assertEqual(before["actions"][2]["trainerClass"], "LT_SURGE")
         self.assertEqual(before["actions"][2]["partyIndex"], 1)
         self.assertEqual(before["actions"][2]["winFlag"], "EVENT_BEAT_LT_SURGE")
 
         self.assertEqual(after["conditions"], {"requiresEvent": "EVENT_GOT_TM24"})
-        self.assertIn("A little word of", after["actions"][1]["lines"])
+        self.assertEqual(after["actions"][1]["lines"][0], "A little word of\nadvice, kid!")
 
 
 class CinnabarGymTrainerTextCandidateTest(unittest.TestCase):
@@ -1666,7 +1901,7 @@ class CinnabarGymTrainerTextCandidateTest(unittest.TestCase):
             battle["conditions"],
             {"requiresEventAbsent": "EVENT_BEAT_CINNABAR_GYM_TRAINER_3"},
         )
-        self.assertIn("I just like using", battle["actions"][1]["lines"])
+        assert_dialogue_contains(self, battle["actions"][1]["lines"], "I just like using")
         self.assertEqual(battle["actions"][2]["type"], "startTrainerBattle")
         self.assertEqual(battle["actions"][2]["trainerClass"], "BURGLAR")
         self.assertEqual(battle["actions"][2]["partyIndex"], 5)
@@ -1677,7 +1912,7 @@ class CinnabarGymTrainerTextCandidateTest(unittest.TestCase):
         )
 
         self.assertEqual(after["conditions"], {"requiresEvent": "EVENT_BEAT_CINNABAR_GYM_TRAINER_3"})
-        self.assertIn("I wish there was", after["actions"][1]["lines"])
+        assert_dialogue_contains(self, after["actions"][1]["lines"], "I wish there was")
 
 
 class IndigoPlateauLobbyMapLoadResetCandidateTest(unittest.TestCase):
@@ -1719,8 +1954,8 @@ class CeruleanCityRivalCandidateTest(unittest.TestCase):
         self.assertEqual(rival["conditions"], {"requiresEventAbsent": "EVENT_BEAT_CERULEAN_RIVAL"})
         self.assertEqual(rival["actions"][1], {"type": "showActor", "actor": "RIVAL", "x": 20, "y": 4})
         self.assertEqual(rival["actions"][3], {"type": "facePlayer", "actor": "RIVAL", "direction": "DOWN"})
-        self.assertIn("<RIVAL>: Yo!", rival["actions"][4]["lines"])
-        self.assertIn("what you caught,", rival["actions"][4]["lines"])
+        assert_dialogue_contains(self, rival["actions"][4]["lines"], "<RIVAL>: Yo!")
+        assert_dialogue_contains(self, rival["actions"][4]["lines"], "what you caught,")
 
         battle = rival["actions"][5]
         self.assertEqual(battle["type"], "startTrainerBattle")
@@ -1756,7 +1991,7 @@ class Route22RivalCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE",
             },
         )
-        self.assertIn("<RIVAL>: Hey!", rival1["actions"][4]["lines"])
+        assert_dialogue_contains(self, rival1["actions"][4]["lines"], "<RIVAL>: Hey!")
         battle1 = rival1["actions"][5]
         self.assertEqual(battle1["trainerClass"], "RIVAL1")
         self.assertEqual(battle1["winFlag"], "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE")
@@ -1799,7 +2034,7 @@ class SilphCo7FRivalCandidateTest(unittest.TestCase):
         self.assertEqual(upper["trigger"]["coordinates"], [{"x": 3, "y": 2}])
         self.assertEqual(lower["trigger"]["coordinates"], [{"x": 3, "y": 3}])
         self.assertEqual(upper["conditions"], {"requiresEventAbsent": "EVENT_BEAT_SILPH_CO_RIVAL"})
-        self.assertIn("<RIVAL>: What", upper["actions"][1]["lines"])
+        assert_dialogue_contains(self, upper["actions"][1]["lines"], "<RIVAL>: What")
         self.assertEqual(upper["actions"][2], {"type": "move", "actor": "RIVAL", "movements": ["UP", "UP", "UP"]})
         self.assertEqual(lower["actions"][2], {"type": "move", "actor": "RIVAL", "movements": ["UP", "UP", "UP", "UP"]})
 
@@ -1894,8 +2129,8 @@ class PokemonTower5FPurifiedZoneCandidateTest(unittest.TestCase):
         self.assertEqual(candidate["conditions"], {"requiresEventAbsent": "EVENT_IN_PURIFIED_ZONE"})
         self.assertEqual(candidate["actions"][1], {"type": "setEvent", "event": "EVENT_IN_PURIFIED_ZONE"})
         self.assertEqual(candidate["actions"][2], {"type": "healParty"})
-        self.assertIn("Entered purified,", candidate["actions"][3]["lines"])
-        self.assertIn("are fully healed!", candidate["actions"][3]["lines"])
+        assert_dialogue_contains(self, candidate["actions"][3]["lines"], "Entered purified,")
+        assert_dialogue_contains(self, candidate["actions"][3]["lines"], "are fully healed!")
         self.assertEqual(candidate["source"]["adapter"], "pokemon_tower_5f_purified_zone_v1")
         self.assertIn("PokemonTower5FDefaultScript", candidate["source"]["coveredLabels"])
 
@@ -1918,7 +2153,7 @@ class TrainerAfterBattleObjectDropCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_ROCKET_DROPPED_LIFT_KEY",
             },
         )
-        self.assertIn("Oh no! I dropped", drop["actions"][1]["lines"])
+        assert_dialogue_contains(self, drop["actions"][1]["lines"], "Oh no! I dropped")
         self.assertEqual(drop["actions"][2], {"type": "setEvent", "event": "EVENT_ROCKET_DROPPED_LIFT_KEY"})
         self.assertEqual(
             drop["actions"][3],
@@ -1928,7 +2163,7 @@ class TrainerAfterBattleObjectDropCandidateTest(unittest.TestCase):
         self.assertIn("RocketHideoutB4FRocket3AfterBattleText", drop["source"]["coveredLabels"])
 
         self.assertEqual(repeat["conditions"], {"requiresEvent": "EVENT_ROCKET_DROPPED_LIFT_KEY"})
-        self.assertIn("the LIFT KEY!", repeat["actions"][1]["lines"])
+        assert_dialogue_contains(self, repeat["actions"][1]["lines"], "the LIFT KEY!")
 
 
 class RocketHideoutB4FGiovanniCandidateTest(unittest.TestCase):
@@ -1952,7 +2187,7 @@ class RocketHideoutB4FGiovanniCandidateTest(unittest.TestCase):
         self.assertEqual(battle["partyIndex"], 1)
         self.assertEqual(battle["winFlag"], "EVENT_BEAT_ROCKET_HIDEOUT_GIOVANNI")
         self.assertIn("WHAT!", battle["postWinActions"][0]["lines"][0])
-        self.assertIn("I hope we meet", battle["postWinActions"][0]["lines"][-2])
+        assert_dialogue_contains(self, battle["postWinActions"][0]["lines"], "I hope we meet")
         self.assertEqual(battle["postWinActions"][1], {"type": "hideActor", "actor": "GIOVANNI"})
         self.assertEqual(
             battle["postWinActions"][2],
@@ -1990,8 +2225,8 @@ class TrainerAfterBattleFlagSideEffectCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_BEAT_LANCE",
             },
         )
-        self.assertIn("That's it!", candidate["actions"][1]["lines"])
-        self.assertIn("I still can't", candidate["actions"][2]["lines"])
+        assert_dialogue_contains(self, candidate["actions"][1]["lines"], "That's it!")
+        assert_dialogue_contains(self, candidate["actions"][2]["lines"], "I still can't")
         self.assertEqual(candidate["actions"][3], {"type": "setEvent", "event": "EVENT_BEAT_LANCE"})
         self.assertEqual(candidate["source"]["adapter"], "trainer_after_battle_flag_side_effect_v1")
         self.assertIn("LancesRoomTrainerHeader0", candidate["source"]["coveredLabels"])
@@ -2237,7 +2472,7 @@ class MtMoonFossilChoiceCandidateTest(unittest.TestCase):
             },
         )
         self.assertEqual(prompt["actions"][1]["speaker"], "SUPER NERD")
-        self.assertIn("OK!", prompt["actions"][1]["lines"])
+        assert_dialogue_contains(self, prompt["actions"][1]["lines"], "OK!")
         self.assertEqual(prompt["source"]["adapter"], "mt_moon_fossil_choice_v1")
         self.assertIn("MtMoonB2FDefeatedSuperNerdScript", prompt["source"]["coveredLabels"])
 
@@ -2269,12 +2504,12 @@ class SilphCo9FNurseCandidateTest(unittest.TestCase):
             heal["conditions"],
             {"requiresEventAbsent": "EVENT_BEAT_SILPH_CO_GIOVANNI"},
         )
-        self.assertIn("You look tired!", heal["actions"][1]["lines"])
+        assert_dialogue_contains(self, heal["actions"][1]["lines"], "You look tired!")
         self.assertEqual(heal["actions"][2], {"type": "healParty"})
-        self.assertIn("Don't give up!", heal["actions"][3]["lines"])
+        assert_dialogue_contains(self, heal["actions"][3]["lines"], "Don't give up!")
 
         self.assertEqual(thanks["conditions"], {"requiresEvent": "EVENT_BEAT_SILPH_CO_GIOVANNI"})
-        self.assertIn("Thank you so", thanks["actions"][1]["lines"])
+        assert_dialogue_contains(self, thanks["actions"][1]["lines"], "Thank you so")
 
 
 if __name__ == "__main__":

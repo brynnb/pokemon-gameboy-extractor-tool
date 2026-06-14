@@ -2,21 +2,15 @@
 import os
 import re
 import sqlite3
-from pathlib import Path
 
-# Constants
-BASE_DIR = Path(
-    __file__
-).parent.parent  # Get the parent directory of the script's directory
-POKEMON_DATA_DIR = BASE_DIR / "pokemon-game-data/data/items"
-CONSTANTS_DIR = BASE_DIR / "pokemon-game-data/constants"
-MOVES_DATA_DIR = BASE_DIR / "pokemon-game-data/data/moves"
+from config import CONSTANTS_DIR, DB_PATH, ITEMS_DATA_DIR, MOVES_DATA_DIR
+
+POKEMON_DATA_DIR = ITEMS_DATA_DIR
 
 
 def create_database():
     """Create SQLite database and tables"""
-    # Use the database in the project root
-    conn = sqlite3.connect(BASE_DIR / "pokemon.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
     # Drop existing items table if it exists

@@ -15,21 +15,23 @@ Usage:
 
 import os
 import sqlite3
-import binascii
-from PIL import Image
 from pathlib import Path
 import sys
 import time
-import hashlib
-import io
 import re
 
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-TILE_IMAGES_DIR = "tile_images"
-BATCH_SIZE = 1000  # Number of tiles to insert in a single batch
+from config import (
+    BATCH_SIZE,
+    DB_PATH,
+    TILESET_IMAGE_ALIAS_TARGETS,
+    TILE_IMAGES_DIR,
+    remap_tileset_for_blockset,
+)
+from tile_helpers import (
+    BLOCK_QUADRANT_TILE_COORDS,
+    get_image_hash,
+    render_block_quadrant_image,
+)
 
 
 def create_new_tables():
@@ -91,44 +93,6 @@ def create_new_tables():
     return conn
 
 
-def decode_2bpp_tile(tile_data):
-    """Decode a 2bpp tile into a 2D array of pixel values (0-3)
-
-    Each tile is 8x8 pixels, with 2 bits per pixel.
-    Pixels are spread across neighboring bytes.
-    """
-    pixels = []
-
-    # Process 16 bytes (8 rows of 2 bytes each)
-    for row in range(8):
-        row_pixels = []
-        # Each row is represented by 2 bytes
-        byte1 = tile_data[row * 2]
-        byte2 = tile_data[row * 2 + 1]
-
-        # Process each bit in the bytes
-        for bit in range(8):
-            # Extract the bit from each byte (from MSB to LSB)
-            bit_pos = 7 - bit
-            bit1 = (byte1 >> bit_pos) & 1
-            bit2 = (byte2 >> bit_pos) & 1
-
-            # Combine the bits to get the pixel value (0-3)
-            pixel_value = (bit2 << 1) | bit1
-            row_pixels.append(pixel_value)
-
-        pixels.append(row_pixels)
-
-    return pixels
-
-
-def get_image_hash(img):
-    """Generate a hash for an image to identify duplicates"""
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format="PNG")
-    return hashlib.md5(img_bytes.getvalue()).hexdigest()
-
-
 def extract_tile_images(conn):
     """Extract 16x16 pixel tile images from the blocksets and tilesets"""
     cursor = conn.cursor()
@@ -145,9 +109,6 @@ def extract_tile_images(conn):
         except Exception as e:
             print(f"Error removing {old_file}: {e}")
     print(f"Removed {len(old_files)} old tile images")
-
-    # Define GameBoy color palette (white, light gray, dark gray, black)
-    palette = [(255, 255, 255), (192, 192, 192), (96, 96, 96), (0, 0, 0)]
 
     # Get all tilesets
     cursor.execute("SELECT id, name FROM tilesets")
@@ -172,13 +133,7 @@ def extract_tile_images(conn):
         sys.stdout.write(f"\rProcessing tileset {i}/{total_tilesets}: {tileset_name}")
         sys.stdout.flush()
 
-        # Special case: Map DOJO (tileset ID 5) to GYM (tileset ID 7)
-        # This is because in the original game, DOJO uses the same graphics as GYM
-        query_tileset_id = 7 if tileset_id == 5 else tileset_id
-        # Special case: Map MART (tileset ID 2) to POKECENTER (tileset ID 6)
-        # This is because marts and pokecenters share similar interior graphics
-        if tileset_id == 2:
-            query_tileset_id = 6
+        query_tileset_id = remap_tileset_for_blockset(tileset_id)
 
         # Get blockset data for this tileset
         cursor.execute(
@@ -218,51 +173,8 @@ def extract_tile_images(conn):
 
         # Process each block to create 16x16 pixel images (4 per block)
         for block_index, block_data in blocks.items():
-            # Define the 4 positions in the block (each position is 2x2 tiles)
-            positions = [
-                # Top-left: tiles at positions 0,1,4,5
-                [(0, 0), (0, 1), (1, 0), (1, 1)],
-                # Top-right: tiles at positions 2,3,6,7
-                [(0, 2), (0, 3), (1, 2), (1, 3)],
-                # Bottom-left: tiles at positions 8,9,12,13
-                [(2, 0), (2, 1), (3, 0), (3, 1)],
-                # Bottom-right: tiles at positions 10,11,14,15
-                [(2, 2), (2, 3), (3, 2), (3, 3)],
-            ]
-
-            for pos_index, position in enumerate(positions):
-                # Create a new 16x16 image
-                img = Image.new("RGB", (16, 16), color=(255, 255, 255))
-
-                # Process each of the 4 tiles in this position
-                for i, (y, x) in enumerate(position):
-                    # Calculate the position in the block data
-                    tile_pos = y * 4 + x
-
-                    # Get the tile index from the block data
-                    if tile_pos < len(block_data):
-                        tile_index = block_data[tile_pos]
-                    else:
-                        continue
-
-                    # Get the tile data
-                    tile_data = tiles.get(tile_index)
-                    if not tile_data:
-                        continue
-
-                    # Decode the tile data
-                    tile_pixels = decode_2bpp_tile(tile_data)
-
-                    # Calculate where to place this tile in the 16x16 image
-                    offset_x = (i % 2) * 8  # 0 for left tiles, 8 for right tiles
-                    offset_y = (i // 2) * 8  # 0 for top tiles, 8 for bottom tiles
-
-                    # Draw the tile
-                    for py in range(8):
-                        for px in range(8):
-                            pixel_value = tile_pixels[py][px]
-                            pixel_color = palette[pixel_value]
-                            img.putpixel((offset_x + px, offset_y + py), pixel_color)
+            for pos_index, _ in enumerate(BLOCK_QUADRANT_TILE_COORDS):
+                img = render_block_quadrant_image(block_data, tiles, pos_index)
 
                 # Generate hash for the image
                 img_hash = get_image_hash(img)
@@ -274,16 +186,12 @@ def extract_tile_images(conn):
                     block_pos_to_image_id[(tileset_id, block_index, pos_index)] = (
                         existing_image_id
                     )
-                    # Special case: If this is the GYM tileset (ID 7), also store the mapping for DOJO (ID 5)
-                    if tileset_id == 7:
-                        block_pos_to_image_id[(5, block_index, pos_index)] = (
-                            existing_image_id
-                        )
-                    # Special case: If this is the POKECENTER tileset (ID 6), also store the mapping for MART (ID 2)
-                    if tileset_id == 6:
-                        block_pos_to_image_id[(2, block_index, pos_index)] = (
-                            existing_image_id
-                        )
+                    for alias_tileset_id in TILESET_IMAGE_ALIAS_TARGETS.get(
+                        tileset_id, ()
+                    ):
+                        block_pos_to_image_id[
+                            (alias_tileset_id, block_index, pos_index)
+                        ] = existing_image_id
                     duplicate_count += 1
                 else:
                     # Save the image with a sequential number
@@ -305,12 +213,12 @@ def extract_tile_images(conn):
                     block_pos_to_image_id[(tileset_id, block_index, pos_index)] = (
                         image_id
                     )
-                    # Special case: If this is the GYM tileset (ID 7), also store the mapping for DOJO (ID 5)
-                    if tileset_id == 7:
-                        block_pos_to_image_id[(5, block_index, pos_index)] = image_id
-                    # Special case: If this is the POKECENTER tileset (ID 6), also store the mapping for MART (ID 2)
-                    if tileset_id == 6:
-                        block_pos_to_image_id[(2, block_index, pos_index)] = image_id
+                    for alias_tileset_id in TILESET_IMAGE_ALIAS_TARGETS.get(
+                        tileset_id, ()
+                    ):
+                        block_pos_to_image_id[
+                            (alias_tileset_id, block_index, pos_index)
+                        ] = image_id
                     unique_image_count += 1
 
                 tile_image_count += 1
@@ -443,20 +351,7 @@ def populate_tiles(conn, block_pos_to_image_id):
             raw_tileset_id,
             raw_is_overworld,
         ) in raw_tiles:
-            # Shared tileset mappings (from gfx/tilesets.asm)
-            # Some maps use different tileset IDs but share the same blockset/graphics
-            lookup_tileset_id = raw_tileset_id
-
-            if raw_tileset_id == 5:  # DOJO uses GYM (7)
-                lookup_tileset_id = 7
-            elif raw_tileset_id == 2:  # MART uses POKECENTER (6)
-                lookup_tileset_id = 6
-            elif raw_tileset_id == 10:  # MUSEUM uses GATE (12)
-                lookup_tileset_id = 12
-            elif raw_tileset_id == 9:  # FOREST_GATE uses GATE (12)
-                lookup_tileset_id = 12
-            elif raw_tileset_id == 4:  # REDS_HOUSE_2 uses REDS_HOUSE (1)
-                lookup_tileset_id = 1
+            lookup_tileset_id = remap_tileset_for_blockset(raw_tileset_id)
 
             # Get the block data to check individual tiles
             cursor.execute(

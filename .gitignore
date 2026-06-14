@@ -5,17 +5,18 @@ pokemon-game-data/*
 !pokemon-game-data/
 !pokemon-game-data/.gitkeep
 
-# Ignore contents of sprites folder but keep the folder itself
-sprites/*
-!sprites/.gitkeep
-
 tile_images/
+
+# Generated offline viewer data and copied assets
+pokemon-phaser/public/viewer-data/
+pokemon-phaser/public/viewer-assets/
 
 .cursor
 
 # Database files
 /pokemon.db
 /script_event_candidates.json
+/script_event_conditional_dialogue.json
 /script_event_in_game_trades.json
 /script_event_ir.json
 /script_event_diagnostics.json

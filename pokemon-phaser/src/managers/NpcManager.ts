@@ -17,12 +17,10 @@ enum DirectionFrame {
 
 export class NpcManager {
   private scene: Scene;
-  private spriteManager: SpriteManager;
   private npcSpriteCache: Map<string, string> = new Map();
 
-  constructor(scene: Scene, spriteManager: SpriteManager) {
+  constructor(scene: Scene, _spriteManager: SpriteManager) {
     this.scene = scene;
-    this.spriteManager = spriteManager;
   }
 
   /**
@@ -34,7 +32,7 @@ export class NpcManager {
   getFrameForDirection(
     actionType: string,
     actionDirection: string,
-    spriteKey?: string
+    _spriteKey?: string
   ): { frame: number; flipX: boolean } {
     // Default to facing down
     let frame = DirectionFrame.DOWN;
@@ -51,7 +49,7 @@ export class NpcManager {
     // Handle different action types
     const isWalking = type === "WALK";
 
-    // Check if we have a specific frame and flipX from the server
+    // Some exported actor rows can carry an explicit frame and flip state.
     if (
       (actionType as any)?.frame !== undefined &&
       (actionType as any)?.flipX !== undefined

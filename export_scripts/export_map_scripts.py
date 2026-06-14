@@ -23,13 +23,10 @@ import json
 import os
 import re
 import sqlite3
-from pathlib import Path
 
-# Constants
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-SCRIPTS_DIR = PROJECT_ROOT / "pokemon-game-data/scripts"
-OBJECTS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/objects"
+from config import DB_PATH, MAP_OBJECTS_DIR, SCRIPTS_DIR
+
+OBJECTS_DIR = MAP_OBJECTS_DIR
 
 
 def create_tables(conn):

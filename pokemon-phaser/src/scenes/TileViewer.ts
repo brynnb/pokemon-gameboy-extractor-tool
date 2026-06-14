@@ -1,16 +1,9 @@
 import { Scene } from "phaser";
-import { TileImageCacheEntry, getTileImageUrl } from "../api";
 import { DEFAULT_MAP_ID, DEFAULT_ZOOM, OVERWORLD_MODE } from "../constants";
 import { CameraController } from "../controllers/CameraController";
 import { MapRenderer } from "../renderers/MapRenderer";
 import { MapDataService } from "../services/MapDataService";
 import { TileManager, UiManager } from "../managers";
-import {
-  TileUpdateEvent,
-  NpcUpdateEvent,
-  WalkingNpcsListEvent,
-  webSocketService,
-} from "../services/WebSocketService";
 import WebFont from "webfontloader";
 
 export class TileViewer extends Scene {
@@ -27,7 +20,6 @@ export class TileViewer extends Scene {
   private items: any[] = [];
   private npcs: any[] = [];
   private warps: any[] = [];
-  private walkingNpcs: any[] = []; // Store walking NPCs separately
 
   // View mode tracking
   private isOverworldMode: boolean = OVERWORLD_MODE;
@@ -39,28 +31,9 @@ export class TileViewer extends Scene {
   // Loading text for preload phase
   private preloadText: Phaser.GameObjects.Text;
 
-  // Event handlers
-  private handleTileUpdateBound: (event: TileUpdateEvent) => void;
-  private handleNpcUpdateBound: (event: NpcUpdateEvent) => void;
-  private handleWalkingNpcsListBound: (event: WalkingNpcsListEvent) => void;
-  private handleConnectedBound: () => void;
-  private handleDisconnectedBound: () => void;
-
   constructor() {
     super("TileViewer");
     this.mapDataService = new MapDataService();
-
-    // Bind event handlers to this instance
-    this.handleTileUpdateBound = this.handleTileUpdate.bind(this);
-    this.handleNpcUpdateBound = this.handleNpcUpdate.bind(this);
-    this.handleWalkingNpcsListBound = this.handleWalkingNpcsList.bind(this);
-    this.handleConnectedBound = () => {
-      // Reduced logging - only log if in development mode
-      if (process.env.NODE_ENV === "development") {
-        console.log("Connected to WebSocket server");
-      }
-    };
-    this.handleDisconnectedBound = () => {};
   }
 
   preload() {
@@ -119,7 +92,6 @@ export class TileViewer extends Scene {
     this.items = [];
     this.warps = [];
     this.npcs = [];
-    this.walkingNpcs = [];
     this.mapInfo = null;
 
     // Set up scene cleanup
@@ -157,9 +129,6 @@ export class TileViewer extends Scene {
         "useOverworldSavedCamera"
       );
     }
-
-    // Log the current camera state in registry for debugging
-    const savedCameraState = this.game.registry.get("overworldCameraState");
 
     // Check if we should preserve camera state
     const shouldPreserveCamera =
@@ -366,204 +335,6 @@ export class TileViewer extends Scene {
     }
   }
 
-  setupWebSocket() {
-    try {
-      // Reduced logging
-      if (process.env.NODE_ENV === "development") {
-        console.log("Setting up WebSocket connection");
-      }
-
-      // Disconnect from any existing connection first
-      webSocketService.disconnect();
-
-      // Wait a short time to ensure disconnection is complete
-      setTimeout(() => {
-        // Connect to the WebSocket server
-        webSocketService.connect();
-
-        // Listen for tile updates
-        webSocketService.on("tileUpdate", this.handleTileUpdateBound);
-
-        // Listen for NPC updates
-        webSocketService.on("npcUpdate", this.handleNpcUpdateBound);
-
-        // Listen for the initial list of walking NPCs
-        webSocketService.on("walkingNpcsList", this.handleWalkingNpcsListBound);
-
-        // Handle connection events if needed
-        webSocketService.on("connected", this.handleConnectedBound);
-        webSocketService.on("disconnected", this.handleDisconnectedBound);
-      }, 100);
-    } catch (error) {
-      console.error("Error setting up WebSocket:", error);
-    }
-  }
-
-  handleTileUpdate(event: TileUpdateEvent) {
-    // Find the tile in our local data
-    const tileIndex = this.tiles.findIndex((tile) => tile.id === event.tileId);
-
-    if (tileIndex !== -1) {
-      // Update the tile image ID in our local data
-      this.tiles[tileIndex].tile_image_id = event.newTileImageId;
-
-      // Get the tile's position
-      const tile = this.tiles[tileIndex];
-
-      // Update the tile sprite in the renderer
-      this.mapRenderer.updateTile(tile.x, tile.y, event.newTileImageId);
-    }
-  }
-
-  handleNpcUpdate(event: NpcUpdateEvent) {
-    // First check if this is a walking NPC (which we track separately)
-    const walkingNpcIndex = this.walkingNpcs.findIndex(
-      (npc) => npc.id === event.npc.id
-    );
-
-    if (walkingNpcIndex !== -1) {
-      // Store the old position
-      const oldX = this.walkingNpcs[walkingNpcIndex].x;
-      const oldY = this.walkingNpcs[walkingNpcIndex].y;
-
-      // Update the NPC position and animation properties in our local data
-      this.walkingNpcs[walkingNpcIndex].x = event.npc.x;
-      this.walkingNpcs[walkingNpcIndex].y = event.npc.y;
-
-      // Update frame and flipX if provided
-      if (event.npc.frame !== undefined) {
-        this.walkingNpcs[walkingNpcIndex].frame = event.npc.frame;
-      }
-
-      if (event.npc.flipX !== undefined) {
-        this.walkingNpcs[walkingNpcIndex].flipX = event.npc.flipX;
-      }
-
-      // Update the NPC sprite in the renderer
-      if (oldX !== event.npc.x || oldY !== event.npc.y) {
-        // Position changed, use position update method
-        this.mapRenderer.updateNpcPosition(
-          event.npc.id,
-          oldX,
-          oldY,
-          event.npc.x,
-          event.npc.y
-        );
-      } else if (
-        event.npc.frame !== undefined ||
-        event.npc.flipX !== undefined
-      ) {
-        // Only animation changed, update the sprite directly
-        this.mapRenderer.updateNpcAnimation(
-          event.npc.id,
-          event.npc.frame,
-          event.npc.flipX
-        );
-      }
-      return;
-    }
-
-    // If not a walking NPC, check regular NPCs
-    const npcIndex = this.npcs.findIndex((npc) => npc.id === event.npc.id);
-
-    if (npcIndex !== -1) {
-      // Store the old position
-      const oldX = this.npcs[npcIndex].x;
-      const oldY = this.npcs[npcIndex].y;
-
-      // Update the NPC position and animation properties in our local data
-      this.npcs[npcIndex].x = event.npc.x;
-      this.npcs[npcIndex].y = event.npc.y;
-
-      // Update frame and flipX if provided
-      if (event.npc.frame !== undefined) {
-        this.npcs[npcIndex].frame = event.npc.frame;
-      }
-
-      if (event.npc.flipX !== undefined) {
-        this.npcs[npcIndex].flipX = event.npc.flipX;
-      }
-
-      // Update the NPC sprite in the renderer
-      if (oldX !== event.npc.x || oldY !== event.npc.y) {
-        // Position changed, use position update method
-        this.mapRenderer.updateNpcPosition(
-          event.npc.id,
-          oldX,
-          oldY,
-          event.npc.x,
-          event.npc.y
-        );
-      } else if (
-        event.npc.frame !== undefined ||
-        event.npc.flipX !== undefined
-      ) {
-        // Only animation changed, update the sprite directly
-        this.mapRenderer.updateNpcAnimation(
-          event.npc.id,
-          event.npc.frame,
-          event.npc.flipX
-        );
-      }
-    } else {
-      // If the NPC isn't in our local data, it might be a new NPC
-      // Reduced logging - only log in development mode
-      if (process.env.NODE_ENV === "development") {
-        console.log(`Received update for unknown NPC: ${event.npc.id}`);
-      }
-
-      // Only add if it's for the current map or we're in overworld mode
-      if (
-        this.isOverworldMode ||
-        (this.mapInfo && event.npc.map_id === this.mapInfo.id)
-      ) {
-        // Check if it's a walking NPC
-        if (event.npc.action_type === "WALK") {
-          this.walkingNpcs.push(event.npc);
-        } else {
-          this.npcs.push(event.npc);
-        }
-
-        // Preload the NPC sprite and then render it
-        this.tileManager.preloadNpcSprites([event.npc]).then(() => {
-          this.mapRenderer.renderNpc(event.npc);
-        });
-      }
-    }
-  }
-
-  handleWalkingNpcsList(event: WalkingNpcsListEvent) {
-    // Reduced logging - only log count instead of full data
-    if (process.env.NODE_ENV === "development") {
-      console.log(`Received initial list of ${event.npcs.length} walking NPCs`);
-    }
-
-    // Store the walking NPCs
-    this.walkingNpcs = event.npcs;
-
-    // Filter out any walking NPCs from the regular NPCs array to avoid duplicates
-    if (this.npcs.length > 0) {
-      const walkingNpcIds = this.walkingNpcs.map((npc) => npc.id);
-      this.npcs = this.npcs.filter((npc) => !walkingNpcIds.includes(npc.id));
-    }
-
-    // Preload sprites for walking NPCs if needed
-    if (this.walkingNpcs.length > 0) {
-      this.tileManager.preloadNpcSprites(this.walkingNpcs).then(() => {
-        // Render the walking NPCs
-        this.walkingNpcs.forEach((npc) => {
-          // Only render NPCs for the current map or if in overworld mode
-          if (
-            this.isOverworldMode ||
-            (this.mapInfo && npc.map_id === this.mapInfo.id)
-          ) {
-            this.mapRenderer.renderNpc(npc);
-          }
-        });
-      });
-    }
-  }
-
   handleResize() {
     this.cameraController.handleResize();
     this.uiManager.handleResize();
@@ -587,7 +358,6 @@ export class TileViewer extends Scene {
       this.items = [];
       this.warps = [];
       this.npcs = [];
-      this.walkingNpcs = [];
 
       // Remove any map legend (which is only present in overworld view)
       this.removeMapLegend();
@@ -661,11 +431,10 @@ export class TileViewer extends Scene {
         // Fetch all NPCs
         const allNpcs = await this.mapDataService.fetchNPCs();
 
-        // Filter NPCs for this map, excluding walking NPCs which will come from WebSocket
+        // Filter NPCs for this map. Walking NPCs use their exported source
+        // positions in the offline viewer.
         if (Array.isArray(allNpcs)) {
-          this.npcs = allNpcs.filter(
-            (npc: any) => npc.map_id === mapId && npc.action_type !== "WALK"
-          );
+          this.npcs = allNpcs.filter((npc: any) => npc.map_id === mapId);
 
           // Preload NPC sprites before rendering
           if (this.npcs.length > 0) {
@@ -682,24 +451,12 @@ export class TileViewer extends Scene {
         this.npcs = [];
       }
 
-      // Connect to WebSocket server before rendering to get walking NPCs
-      this.uiManager.setLoadingText(
-        "Connecting to server for real-time updates..."
-      );
-      this.setupWebSocket();
-
-      // Wait a short time for WebSocket to connect and receive walking NPCs
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Render the map with all NPCs (static and walking)
+      // Render the map with all exported NPCs.
       const mapBounds = this.mapRenderer.renderMap(
         this.tiles,
         this.items,
         this.warps,
-        [
-          ...this.npcs,
-          ...this.walkingNpcs.filter((npc) => npc.map_id === mapId),
-        ]
+        this.npcs
       );
 
       // Always center the camera on the map for map views
@@ -738,7 +495,6 @@ export class TileViewer extends Scene {
       this.items = [];
       this.warps = [];
       this.npcs = [];
-      this.walkingNpcs = [];
 
       // Update mode
       this.isOverworldMode = true;
@@ -751,6 +507,7 @@ export class TileViewer extends Scene {
 
       // Get all overworld maps
       const overworldMaps = await this.mapDataService.fetchOverworldMaps();
+      const overworldMapIds = new Set(overworldMaps.map((map) => map.id));
 
       // Create a combined map info object for all overworld maps
       this.mapInfo = {
@@ -790,9 +547,10 @@ export class TileViewer extends Scene {
         // Fetch all items
         const allItems = await this.mapDataService.fetchItems();
 
-        // Use all items for overworld mode
         if (Array.isArray(allItems)) {
-          this.items = allItems;
+          this.items = allItems.filter((item) =>
+            overworldMapIds.has(item.map_id)
+          );
         } else {
           this.items = [];
         }
@@ -804,12 +562,11 @@ export class TileViewer extends Scene {
       this.uiManager.setLoadingText("Loading NPCs...");
 
       try {
-        // Fetch all NPCs, excluding walking NPCs which will come from WebSocket
+        // Fetch all exported overworld NPCs.
         const allNpcs = await this.mapDataService.fetchNPCs();
 
         if (Array.isArray(allNpcs)) {
-          // Filter out walking NPCs
-          this.npcs = allNpcs.filter((npc) => npc.action_type !== "WALK");
+          this.npcs = allNpcs.filter((npc) => overworldMapIds.has(npc.map_id));
 
           // Preload NPC sprites before rendering
           if (this.npcs.length > 0) {
@@ -830,27 +587,25 @@ export class TileViewer extends Scene {
 
       try {
         // Fetch all warps
-        this.warps = await this.mapDataService.fetchWarps();
+        const allWarps = await this.mapDataService.fetchWarps();
+        if (Array.isArray(allWarps)) {
+          this.warps = allWarps.filter((warp) =>
+            overworldMapIds.has(warp.map_id)
+          );
+        } else {
+          this.warps = [];
+        }
       } catch (warpError) {
         console.error("Error loading warps:", warpError);
         this.warps = [];
       }
 
-      // Connect to WebSocket server before rendering to get walking NPCs
-      this.uiManager.setLoadingText(
-        "Connecting to server for real-time updates..."
-      );
-      this.setupWebSocket();
-
-      // Wait a short time for WebSocket to connect and receive walking NPCs
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      // Render the map with all NPCs (static and walking)
+      // Render the map with all exported NPCs.
       const mapBounds = this.mapRenderer.renderMap(
         this.tiles,
         this.items,
         this.warps,
-        [...this.npcs, ...this.walkingNpcs]
+        this.npcs
       );
 
       // Check if we're returning from a map view
@@ -889,9 +644,6 @@ export class TileViewer extends Scene {
         this.cameraController.setZoom(DEFAULT_ZOOM);
       }
 
-      // Create a legend for the maps
-      this.createMapLegend(overworldMaps);
-
       // Update mode text
       this.uiManager.setModeText("Overworld View");
 
@@ -907,29 +659,9 @@ export class TileViewer extends Scene {
     }
   }
 
-  createMapLegend(maps: any[]) {
-    // Implementation of map legend creation
-    // This is a placeholder for the actual implementation
-  }
-
   cleanupResources() {
-    // Reduced logging
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       console.log("Cleaning up resources");
-    }
-
-    // Disconnect from WebSocket server
-    try {
-      webSocketService.disconnect();
-
-      // Remove all event listeners
-      webSocketService.off("tileUpdate", this.handleTileUpdateBound);
-      webSocketService.off("npcUpdate", this.handleNpcUpdateBound);
-      webSocketService.off("walkingNpcsList", this.handleWalkingNpcsListBound);
-      webSocketService.off("connected", this.handleConnectedBound);
-      webSocketService.off("disconnected", this.handleDisconnectedBound);
-    } catch (error) {
-      console.error("Error disconnecting WebSocket:", error);
     }
 
     // Clean up other resources
@@ -954,7 +686,6 @@ export class TileViewer extends Scene {
     this.items = [];
     this.warps = [];
     this.npcs = [];
-    this.walkingNpcs = [];
 
     // Remove the map container and all its children
     if (this.mapContainer) {

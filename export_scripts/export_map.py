@@ -29,23 +29,21 @@ import sqlite3
 import glob
 import subprocess
 import shutil
-from pathlib import Path
-import binascii
 import argparse
 from PIL import Image, ImageDraw
 
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-MAPS_DIR = PROJECT_ROOT / "pokemon-game-data/maps"
-MAP_HEADERS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/headers"
-MAP_CONSTANTS_FILE = PROJECT_ROOT / "pokemon-game-data/constants/map_constants.asm"
-BLOCKSETS_DIR = PROJECT_ROOT / "pokemon-game-data/gfx/blocksets"
-TILESETS_DIR = PROJECT_ROOT / "pokemon-game-data/gfx/tilesets"
-TILESET_CONSTANTS_FILE = (
-    PROJECT_ROOT / "pokemon-game-data/constants/tileset_constants.asm"
+from config import (
+    BLOCKSETS_DIR,
+    COLLISION_TILE_IDS_FILE,
+    COLLISION_TILESET_DEFINITIONS,
+    DB_PATH,
+    MAP_CONSTANTS_FILE,
+    MAP_HEADERS_DIR,
+    MAPS_DIR,
+    TILESET_CONSTANTS_FILE,
+    TILESETS_DIR,
 )
+from tile_helpers import draw_scaled_tile, parse_2bpp_file, parse_blockset_file
 
 # Regular expressions
 MAP_CONST_PATTERN = re.compile(
@@ -497,93 +495,6 @@ def find_tileset_id(tileset_name, tileset_constants):
     return None
 
 
-def parse_blockset_file(blockset_path):
-    """Parse a blockset (.bst) file and return the block data
-
-    Each block is 16 bytes, representing a 4x4 grid of tile indices.
-    These are stored contiguously in the file.
-    """
-    blocks = []
-
-    try:
-        with open(blockset_path, "rb") as f:
-            blockset_data = f.read()
-
-        # Each block is 16 bytes (4x4 tile indices)
-        block_size = 16
-        num_blocks = len(blockset_data) // block_size
-
-        for i in range(num_blocks):
-            start_pos = i * block_size
-            end_pos = start_pos + block_size
-            block_data = blockset_data[start_pos:end_pos]
-            blocks.append(block_data)
-
-        return blocks
-    except Exception as e:
-        print(f"Error parsing blockset file {blockset_path}: {e}")
-        return []
-
-
-def parse_2bpp_file(file_path):
-    """Parse a 2bpp file and return the tile data
-
-    Each tile is 16 bytes (8x8 pixels, 2 bits per pixel).
-    Pixels are spread across neighboring bytes.
-    """
-    tiles = []
-
-    try:
-        with open(file_path, "rb") as f:
-            file_data = f.read()
-
-        # Each tile is 16 bytes (8x8 pixels, 2 bits per pixel)
-        tile_size = 16
-        num_tiles = len(file_data) // tile_size
-
-        for i in range(num_tiles):
-            start_pos = i * tile_size
-            end_pos = start_pos + tile_size
-            tile_data = file_data[start_pos:end_pos]
-            tiles.append(tile_data)
-
-        return tiles
-    except Exception as e:
-        print(f"Error parsing 2bpp file {file_path}: {e}")
-        return []
-
-
-def decode_2bpp_tile(tile_data):
-    """Decode a 2bpp tile into a 2D array of pixel values (0-3)
-
-    Each tile is 8x8 pixels, with 2 bits per pixel.
-    Pixels are spread across neighboring bytes.
-    """
-    pixels = []
-
-    # Process 16 bytes (8 rows of 2 bytes each)
-    for row in range(8):
-        row_pixels = []
-        # Each row is represented by 2 bytes
-        byte1 = tile_data[row * 2]
-        byte2 = tile_data[row * 2 + 1]
-
-        # Process each bit in the bytes
-        for bit in range(8):
-            # Extract the bit from each byte (from MSB to LSB)
-            bit_pos = 7 - bit
-            bit1 = (byte1 >> bit_pos) & 1
-            bit2 = (byte2 >> bit_pos) & 1
-
-            # Combine the bits to get the pixel value (0-3)
-            pixel_value = (bit2 << 1) | bit1
-            row_pixels.append(pixel_value)
-
-        pixels.append(row_pixels)
-
-    return pixels
-
-
 def render_map(map_name):
     """Render a map based on the data in the database
 
@@ -644,9 +555,6 @@ def render_map(map_name):
     # Create a dictionary of tile_index -> tile_data
     tiles = {row[0]: row[1] for row in tile_rows}
 
-    # Define GameBoy color palette (white, light gray, dark gray, black)
-    palette = [(255, 255, 255), (192, 192, 192), (96, 96, 96), (0, 0, 0)]
-
     # Calculate image dimensions
     # Each block is 2x2 squares, each square is 16x16 pixels
     # Use a scale factor to make the image larger and sharper
@@ -682,31 +590,13 @@ def render_map(map_name):
                         print(f"Tile {tile_index} not found in tileset")
                         continue
 
-                    # Decode the tile data
-                    tile_pixels = decode_2bpp_tile(tile_data)
-
                     # Calculate the position of this tile in the image
                     # Each tile is 8x8 pixels
                     # Each block is 4x4 tiles (32x32 pixels)
                     tile_x = (x * 32 + block_x * 8) * scale
                     tile_y = (y * 32 + block_y * 8) * scale
 
-                    # Draw the tile with scaling
-                    for py in range(8):
-                        for px in range(8):
-                            pixel_value = tile_pixels[py][px]
-                            pixel_color = palette[pixel_value]
-
-                            # Draw a scaled pixel (as a rectangle)
-                            for sy in range(scale):
-                                for sx in range(scale):
-                                    draw.point(
-                                        (
-                                            tile_x + px * scale + sx,
-                                            tile_y + py * scale + sy,
-                                        ),
-                                        fill=pixel_color,
-                                    )
+                    draw_scaled_tile(draw, tile_data, tile_x, tile_y, scale)
 
     return img
 
@@ -718,38 +608,8 @@ def load_collision_data(conn):
     # Clear existing collision data
     cursor.execute("DELETE FROM collision_tiles")
 
-    # Define the mapping between collision data names and tileset IDs
-    collision_to_tileset = {
-        "Underground_Coll": {"id": 11, "name": "UNDERGROUND"},
-        "Overworld_Coll": {"id": 0, "name": "OVERWORLD"},
-        "RedsHouse1_Coll": {"id": 1, "name": "REDS_HOUSE_1"},
-        "RedsHouse2_Coll": {"id": 4, "name": "REDS_HOUSE_2"},
-        "Mart_Coll": {"id": 2, "name": "MART"},
-        "Pokecenter_Coll": {"id": 6, "name": "POKECENTER"},
-        "Dojo_Coll": {"id": 5, "name": "DOJO"},
-        "Gym_Coll": {"id": 7, "name": "GYM"},
-        "Forest_Coll": {"id": 3, "name": "FOREST"},
-        "House_Coll": {"id": 8, "name": "HOUSE"},
-        "ForestGate_Coll": {"id": 9, "name": "FOREST_GATE"},
-        "Museum_Coll": {"id": 10, "name": "MUSEUM"},
-        "Gate_Coll": {"id": 12, "name": "GATE"},
-        "Ship_Coll": {"id": 13, "name": "SHIP"},
-        "ShipPort_Coll": {"id": 14, "name": "SHIP_PORT"},
-        "Cemetery_Coll": {"id": 15, "name": "CEMETERY"},
-        "Interior_Coll": {"id": 16, "name": "INTERIOR"},
-        "Cavern_Coll": {"id": 17, "name": "CAVERN"},
-        "Lobby_Coll": {"id": 18, "name": "LOBBY"},
-        "Mansion_Coll": {"id": 19, "name": "MANSION"},
-        "Lab_Coll": {"id": 20, "name": "LAB"},
-        "Club_Coll": {"id": 21, "name": "CLUB"},
-        "Facility_Coll": {"id": 22, "name": "FACILITY"},
-        "Plateau_Coll": {"id": 23, "name": "PLATEAU"},
-    }
-
     # Parse the collision data from the original game's collision_tile_ids.asm file
-    collision_file_path = (
-        PROJECT_ROOT / "pokemon-game-data/data/tilesets/collision_tile_ids.asm"
-    )
+    collision_file_path = COLLISION_TILE_IDS_FILE
 
     if not os.path.exists(collision_file_path):
         print(f"Warning: Collision data file not found at {collision_file_path}")
@@ -803,8 +663,8 @@ def load_collision_data(conn):
 
         # Insert the parsed collision data into the database
         for coll_name, tile_ids in collision_data.items():
-            if coll_name in collision_to_tileset:
-                tileset_info = collision_to_tileset[coll_name]
+            if coll_name in COLLISION_TILESET_DEFINITIONS:
+                tileset_info = COLLISION_TILESET_DEFINITIONS[coll_name]
                 tileset_id = tileset_info["id"]
                 tileset_name = tileset_info["name"]
 

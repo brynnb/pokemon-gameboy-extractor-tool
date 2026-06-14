@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "./constants";
+import { viewerUrl } from "./constants";
 
 /**
  * Get the URL for a sprite image by name
@@ -6,5 +6,5 @@ import { API_BASE_URL } from "./constants";
  * @returns The full URL to the sprite image
  */
 export const getSpriteUrl = (spriteName: string): string => {
-  return `${API_BASE_URL}/sprite/${spriteName}`;
+  return viewerUrl(`viewer-assets/sprites/${spriteName}`);
 };

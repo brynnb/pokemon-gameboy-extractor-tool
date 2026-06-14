@@ -2,14 +2,10 @@
 import os
 import re
 import sqlite3
-from pathlib import Path
 
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-POKEMON_DATA_DIR = PROJECT_ROOT / "pokemon-game-data/data/moves"
-CONSTANTS_DIR = PROJECT_ROOT / "pokemon-game-data/constants"
+from config import CONSTANTS_DIR, DB_PATH, MOVES_DATA_DIR
+
+POKEMON_DATA_DIR = MOVES_DATA_DIR
 
 # Hardcoded HM moves based on hm_moves.asm
 HM_MOVES = {"CUT", "FLY", "SURF", "STRENGTH", "FLASH"}

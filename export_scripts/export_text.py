@@ -15,15 +15,10 @@ Creates tables:
 import os
 import re
 import sqlite3
-from pathlib import Path
 
-# Constants
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-TEXT_DIR = PROJECT_ROOT / "pokemon-game-data/text"
-SCRIPTS_DIR = PROJECT_ROOT / "pokemon-game-data/scripts"
-OBJECTS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/objects"
-GLOBAL_TEXT_DIR = PROJECT_ROOT / "pokemon-game-data/data/text"
+from config import DB_PATH, GLOBAL_TEXT_DIR, MAP_OBJECTS_DIR, SCRIPTS_DIR, TEXT_DIR
+
+OBJECTS_DIR = MAP_OBJECTS_DIR
 
 # Text assembly macros that contain dialogue content
 TEXT_MACROS = {"text", "line", "cont", "para", "page", "next"}

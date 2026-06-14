@@ -1,9 +1,5 @@
-"""
-Utility module for Pokémon-related constants and functions.
-This module contains shared resources that can be used across multiple scripts.
-"""
+"""Shared Pokemon name normalization for exporter scripts."""
 
-# Special character name mappings
 SPECIAL_NAME_MAPPINGS = {
     "NidoranM": "NIDORAN_M",
     "NidoranF": "NIDORAN_F",
@@ -18,6 +14,4 @@ SPECIAL_NAME_MAPPINGS = {
 
 def normalize_pokemon_name(name):
     """Convert names with special characters to their constant representation."""
-    if name in SPECIAL_NAME_MAPPINGS:
-        return SPECIAL_NAME_MAPPINGS[name]
-    return name.upper()
+    return SPECIAL_NAME_MAPPINGS.get(name, name.upper())

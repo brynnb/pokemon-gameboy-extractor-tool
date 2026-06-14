@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${PYTHON_VENV:-${REPO_ROOT}/.venv}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<EOF
 Usage: npm run generate
 
-Prepare the extractor environment and rebuild pokemon.db.
+Prepare the extractor environment, rebuild pokemon.db, and generate offline
+viewer data/assets.
 
 Environment:
   PYTHON_VENV  Python virtualenv path. Defaults to .venv.
 
 Output:
   ${REPO_ROOT}/pokemon.db
+  ${REPO_ROOT}/pokemon-phaser/public/viewer-data/
+  ${REPO_ROOT}/pokemon-phaser/public/viewer-assets/
 EOF
   exit 0
 fi
@@ -106,3 +108,5 @@ echo "Rebuilding pokemon.db..."
 
 echo "Extractor data generation complete."
 echo "Output: ${REPO_ROOT}/pokemon.db"
+echo "Viewer data: ${REPO_ROOT}/pokemon-phaser/public/viewer-data"
+echo "Viewer assets: ${REPO_ROOT}/pokemon-phaser/public/viewer-assets"

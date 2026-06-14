@@ -2,16 +2,12 @@
 import os
 import re
 import sqlite3
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-POKEMON_DATA_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/objects"
-CONSTANTS_DIR = PROJECT_ROOT / "pokemon-game-data/constants"
-MAP_HEADERS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/headers"
-DB_PATH = PROJECT_ROOT / "pokemon.db"
+from config import CONSTANTS_DIR, DB_PATH, MAP_HEADERS_DIR, MAP_OBJECTS_DIR
+
+POKEMON_DATA_DIR = MAP_OBJECTS_DIR
 
 # Map categories
 CITIES_AND_TOWNS = [

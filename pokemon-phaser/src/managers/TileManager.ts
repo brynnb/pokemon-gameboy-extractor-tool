@@ -1,5 +1,5 @@
 import { Scene } from "phaser";
-import { TileImageCacheEntry, getTileImageUrl } from "../api";
+import { TileImageCacheEntry, getTileImageUrl, viewerUrl } from "../api";
 import { TILE_SIZE } from "../constants";
 import { SpriteManager } from "./SpriteManager";
 import { NpcManager } from "./NpcManager";
@@ -54,7 +54,9 @@ export class TileManager {
       texturesToLoad.add(tileImage.id);
 
       // Store the image path for later use
-      const imgUrl = getTileImageUrl(tileImage.id);
+      const imgUrl = tileImage.image_path
+        ? viewerUrl(tileImage.image_path)
+        : getTileImageUrl(tileImage.id);
       this.tileImageCache.set(tileImage.id, {
         key: tileKey,
         path: imgUrl,
@@ -77,7 +79,8 @@ export class TileManager {
       // Load all textures
       for (const tileId of texturesToLoad) {
         const tileKey = `tile-${tileId}`;
-        const imgUrl = getTileImageUrl(tileId);
+        const imgUrl =
+          this.tileImageCache.get(tileId)?.path || getTileImageUrl(tileId);
 
         // Load all textures
         this.scene.load.image(tileKey, imgUrl);

@@ -14,22 +14,17 @@ Creates tables:
 import os
 import re
 import sqlite3
-from pathlib import Path
-import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils.pokemon_utils import SPECIAL_NAME_MAPPINGS, normalize_pokemon_name
-
-# Constants
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-POKEMON_DATA_DIR = PROJECT_ROOT / "pokemon-game-data/data/pokemon"
-BASE_STATS_DIR = POKEMON_DATA_DIR / "base_stats"
-EVOS_MOVES_FILE = POKEMON_DATA_DIR / "evos_moves.asm"
-CONSTANTS_DIR = PROJECT_ROOT / "pokemon-game-data/constants"
-MOVE_CONSTANTS_FILE = CONSTANTS_DIR / "move_constants.asm"
-ITEM_CONSTANTS_FILE = CONSTANTS_DIR / "item_constants.asm"
-POKEDEX_CONSTANTS_FILE = CONSTANTS_DIR / "pokedex_constants.asm"
+from config import (
+    BASE_STATS_DIR,
+    DB_PATH,
+    EVOS_MOVES_FILE,
+    ITEM_CONSTANTS_FILE,
+    MOVE_CONSTANTS_FILE,
+    POKEDEX_CONSTANTS_FILE,
+    POKEMON_DATA_DIR,
+)
+from pokemon_names import SPECIAL_NAME_MAPPINGS, normalize_pokemon_name
 
 
 def create_tables(conn):

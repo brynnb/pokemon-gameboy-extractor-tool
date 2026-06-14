@@ -29,12 +29,9 @@ Usage:
 
 import sqlite3
 import time
-from pathlib import Path
 
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
+from config import DB_PATH
+
 PALLET_TOWN_MAP_ID = 0
 BLOCK_SIZE = 2  # Each block is 2x2 tiles
 

@@ -74,7 +74,7 @@ export class CameraController {
     // Set up mouse wheel for zooming
     this.scene.input.on(
       "wheel",
-      (pointer: any, gameObjects: any, deltaX: number, deltaY: number) => {
+      (_pointer: any, _gameObjects: any, _deltaX: number, deltaY: number) => {
         // Zoom in/out based on wheel direction
         if (deltaY > 0) {
           this.zoomLevel = Math.max(MIN_ZOOM, this.zoomLevel - ZOOM_STEP);

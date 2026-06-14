@@ -9,19 +9,36 @@ leaving app-specific imports to downstream tools.
 import json
 import re
 import sqlite3
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-SCRIPTS_DIR = PROJECT_ROOT / "pokemon-game-data/scripts"
-TEXT_DIR = PROJECT_ROOT / "pokemon-game-data/text"
-OBJECTS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/objects"
-OUTPUT_PATH = PROJECT_ROOT / "script_event_candidates.json"
-IR_OUTPUT_PATH = PROJECT_ROOT / "script_event_ir.json"
-DIAGNOSTICS_OUTPUT_PATH = PROJECT_ROOT / "script_event_diagnostics.json"
-TRADE_OUTPUT_PATH = PROJECT_ROOT / "script_event_in_game_trades.json"
-TILE_OUTPUT_PATH = PROJECT_ROOT / "script_event_tile_overrides.json"
-BOULDER_OUTPUT_PATH = PROJECT_ROOT / "script_event_boulder_targets.json"
+from config import (
+    CINNABAR_LAB_ENGINE_FILE,
+    DB_PATH,
+    EVENT_CONSTANTS_FILE,
+    ITEM_CONSTANTS_FILE,
+    MAP_OBJECTS_DIR,
+    POKEMON_CONSTANTS_FILE,
+    PROJECT_ROOT,
+    SCRIPT_CONSTANTS_FILE,
+    SCRIPT_EVENT_BOULDER_TARGETS_PATH,
+    SCRIPT_EVENT_CANDIDATES_PATH,
+    SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH,
+    SCRIPT_EVENT_DIAGNOSTICS_PATH,
+    SCRIPT_EVENT_IR_PATH,
+    SCRIPT_EVENT_TILE_OVERRIDES_PATH,
+    SCRIPT_EVENT_TRADES_PATH,
+    SCRIPTS_DIR,
+    TEXT_DIR,
+    TRADES_FILE,
+)
+
+OBJECTS_DIR = MAP_OBJECTS_DIR
+OUTPUT_PATH = SCRIPT_EVENT_CANDIDATES_PATH
+IR_OUTPUT_PATH = SCRIPT_EVENT_IR_PATH
+DIAGNOSTICS_OUTPUT_PATH = SCRIPT_EVENT_DIAGNOSTICS_PATH
+TRADE_OUTPUT_PATH = SCRIPT_EVENT_TRADES_PATH
+TILE_OUTPUT_PATH = SCRIPT_EVENT_TILE_OVERRIDES_PATH
+BOULDER_OUTPUT_PATH = SCRIPT_EVENT_BOULDER_TARGETS_PATH
+CONDITIONAL_DIALOGUE_OUTPUT_PATH = SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH
 
 
 def create_tables(conn):
@@ -32,6 +49,7 @@ def create_tables(conn):
     cursor.execute("DROP TABLE IF EXISTS script_event_in_game_trades")
     cursor.execute("DROP TABLE IF EXISTS script_event_tile_overrides")
     cursor.execute("DROP TABLE IF EXISTS script_event_boulder_targets")
+    cursor.execute("DROP TABLE IF EXISTS script_event_conditional_dialogue")
     cursor.execute(
         """
         CREATE TABLE script_event_candidates (
@@ -136,6 +154,22 @@ def create_tables(conn):
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE script_event_conditional_dialogue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text_constant TEXT NOT NULL,
+            map_name TEXT NOT NULL,
+            script_label TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            requires_flags_json TEXT NOT NULL,
+            requires_flags_absent_json TEXT NOT NULL,
+            dialogue_labels_json TEXT NOT NULL,
+            source_json TEXT NOT NULL,
+            row_json TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return cursor
 
@@ -150,22 +184,31 @@ def normalize_text(text):
     )
 
 
+def append_text_macro_page(pages, current_lines):
+    if current_lines:
+        pages.append("\n".join(current_lines).strip())
+    current_lines.clear()
+
+
 def extract_text_labels(text_path):
     if not text_path.exists():
         return {}
 
     labels = {}
     current_label = None
-    lines = []
+    pages = []
+    current_lines = []
 
     for raw_line in text_path.read_text().splitlines():
         stripped = raw_line.strip()
         label_match = re.match(r"^_?(\w+)::$", stripped)
         if label_match:
             if current_label is not None:
-                labels[current_label] = lines
+                append_text_macro_page(pages, current_lines)
+                labels[current_label] = [page for page in pages if page]
             current_label = label_match.group(1)
-            lines = []
+            pages = []
+            current_lines = []
             continue
 
         if current_label is None:
@@ -173,16 +216,35 @@ def extract_text_labels(text_path):
 
         text_match = re.match(r'^(?:text|line|cont|para)\s+"(.*)"$', stripped)
         if text_match:
+            macro = stripped.split(maxsplit=1)[0]
             line = normalize_text(text_match.group(1))
-            if line:
-                lines.append(line)
-        elif stripped in {"done", "text_end"}:
-            labels[current_label] = lines
+            if not line:
+                continue
+            if macro == "para":
+                append_text_macro_page(pages, current_lines)
+                current_lines.append(line)
+            elif macro == "line":
+                current_lines.append(line)
+            elif macro == "cont":
+                if current_lines:
+                    current_lines[-1] = f"{current_lines[-1]} {line}".strip()
+                else:
+                    current_lines.append(line)
+            else:
+                if current_lines:
+                    current_lines.append(line)
+                else:
+                    current_lines = [line]
+        elif stripped in {"done", "text_end", "prompt"}:
+            append_text_macro_page(pages, current_lines)
+            labels[current_label] = [page for page in pages if page]
             current_label = None
-            lines = []
+            pages = []
+            current_lines = []
 
     if current_label is not None:
-        labels[current_label] = lines
+        append_text_macro_page(pages, current_lines)
+        labels[current_label] = [page for page in pages if page]
 
     return labels
 
@@ -577,6 +639,81 @@ def diagnostic_for_ir_block(block, generated_labels):
     }
 
 
+def text_asm_text_pointer_diagnostics(generated_labels):
+    diagnostics = []
+    for script_path in sorted(SCRIPTS_DIR.glob("*.asm")):
+        map_name = script_path.stem
+        script_content = script_path.read_text()
+        text_pointers = parse_text_pointer_map(script_content)
+        blocks_by_label = {block["label"]: block for block in extract_label_blocks(script_content)}
+        for label, block in sorted(blocks_by_label.items()):
+            if label in generated_labels:
+                continue
+            clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+            if "text_asm" not in clean:
+                continue
+            ir = extract_features(label, block["raw"])
+            ir["mapName"] = map_name
+            if diagnostic_for_ir_block(ir, generated_labels):
+                continue
+
+            text_refs = ordered_text_refs(block["raw"])
+            text_constant = text_pointers.get(label, "")
+            details = {
+                "textConstant": text_constant,
+                "kind": ir["kind"],
+                "features": ir["features"],
+                "textRefs": text_refs,
+                "eventRefs": ir["eventRefs"],
+                "itemRefs": ir["itemRefs"],
+                "pokemonRefs": ir["pokemonRefs"],
+                "movementRefs": ir["movementRefs"],
+                "objectRefs": ir["objectRefs"],
+                "battleRefs": ir["battleRefs"],
+                "warpRefs": ir["warpRefs"],
+                "source": {
+                    "adapter": "text_asm_text_pointer_audit_v1",
+                    "scriptPath": str(script_path.relative_to(PROJECT_ROOT)),
+                    "mapName": map_name,
+                    "coveredLabels": [label] if len(text_refs) == 1 else [],
+                },
+            }
+            if len(text_refs) == 1:
+                reason = "direct_text_pointer_v1" if label in text_pointers else "direct_text_label_v1"
+                details["source"]["notes"] = [
+                    "This text_asm block has exactly one source text_far target.",
+                    "The extracted dialogue text data already provides this text; helper calls such as cries or Pokedex display are presentation side effects.",
+                ]
+                diagnostics.append(
+                    {
+                        "mapName": map_name,
+                        "scriptLabel": label,
+                        "status": "covered",
+                        "reason": reason,
+                        "details": details,
+                    }
+                )
+                continue
+
+            reason = "text_asm_no_text_refs"
+            if len(text_refs) > 1:
+                reason = "text_asm_multi_text_branch"
+            details["source"]["notes"] = [
+                "This text_asm block is not generated by a safe adapter and is not a simple direct text wrapper.",
+                "Downstream runtimes should add a generated adapter or authored script before relying on the fallback dialogue label exported from this block.",
+            ]
+            diagnostics.append(
+                {
+                    "mapName": map_name,
+                    "scriptLabel": label,
+                    "status": "unsupported",
+                    "reason": reason,
+                    "details": details,
+                }
+            )
+    return diagnostics
+
+
 def is_standard_trainer_runtime_block(block):
     features = block["features"]
     if not features["hasTrainerBattle"] or features["hasWildBattle"]:
@@ -895,11 +1032,11 @@ def parse_npc_movements(block_raw):
 
 def parse_trade_mons():
     constants = parse_const_sequence(
-        PROJECT_ROOT / "pokemon-game-data/constants/script_constants.asm",
+        SCRIPT_CONSTANTS_FILE,
         "TradeMons indexes",
         "DEF NUM_NPC_TRADES",
     )
-    trades_path = PROJECT_ROOT / "pokemon-game-data/data/events/trades.asm"
+    trades_path = TRADES_FILE
     trades = {}
     trade_index = 0
     for raw_line in trades_path.read_text().splitlines():
@@ -932,7 +1069,7 @@ def parse_trade_mons():
 
 def parse_pokemon_constants():
     constants = set()
-    path = PROJECT_ROOT / "pokemon-game-data/constants/pokemon_constants.asm"
+    path = POKEMON_CONSTANTS_FILE
     for raw_line in path.read_text().splitlines():
         stripped = strip_comment(raw_line)
         if "DEF NUM_POKEMON_INDEXES" in stripped:
@@ -1260,7 +1397,7 @@ def tmhm_display_names():
     mapping = {}
     tm_count = 0
     hm_count = 0
-    constants_path = PROJECT_ROOT / "pokemon-game-data/constants/item_constants.asm"
+    constants_path = ITEM_CONSTANTS_FILE
     for raw_line in constants_path.read_text().splitlines():
         stripped = strip_comment(raw_line)
         hm_match = re.match(r"add_hm\s+([A-Z0-9_]+)", stripped)
@@ -1772,7 +1909,7 @@ def safari_zone_gate_candidates():
 
 
 def parse_object_events_for_map(map_name):
-    objects_path = PROJECT_ROOT / "pokemon-game-data/data/maps/objects" / f"{map_name}.asm"
+    objects_path = OBJECTS_DIR / f"{map_name}.asm"
     if not objects_path.exists():
         return []
 
@@ -2592,6 +2729,281 @@ def parse_flag_gated_dialogue(clean):
             return branches
 
     return None
+
+
+def dialogue_labels_for_branch(text_ref_map, label):
+    if label.startswith("."):
+        labels = text_ref_map.get(label, [])
+    else:
+        labels = [label]
+    return [dialogue_label if dialogue_label.startswith("_") else f"_{dialogue_label}" for dialogue_label in labels]
+
+
+def has_conditional_dialogue_side_effects(block):
+    ir = extract_features(block["label"], block["raw"])
+    features = ir["features"]
+    if features["hasChoice"] or features["hasGiveItem"] or features["hasGivePokemon"] or features["hasMoneyCheck"]:
+        return True
+    if features["hasTrainerBattle"] or features["hasWildBattle"]:
+        return True
+    if ir["movementRefs"] or ir["objectRefs"] or ir["warpRefs"]:
+        return True
+
+    clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+    if re.search(
+        r"\b(?:SetEvent|ResetEvent|CheckAndSetEvent|CheckAndResetEvent|SetEventReuseHL|"
+        r"ResetEventReuseHL|predef|predef_jump|farcall|EngageMapTrainer|InitBattleEnemyParameters|"
+        r"SaveEndBattleTextPointers|DisableWaitingAfterTextDisplay|PlaySound|ReplaceTileBlock|"
+        r"GateUpstairsScript_PrintIfFacingUp|DisplayTextID|GiveItem|GivePokemon|YesNoChoice)\b",
+        clean,
+    ):
+        return True
+    call_targets = re.findall(r"\bcall\s+(\w+)", clean)
+    if any(target != "PrintText" for target in call_targets):
+        return True
+    if re.search(r"\bjp\s+(?!TextScriptEnd\b)\w+", clean):
+        return True
+    return False
+
+
+def conditional_dialogue_row(map_name, script_path, text_path, block, text_constant, priority, requires_flags, requires_flags_absent, dialogue_labels, adapter, notes=None):
+    source = source_metadata(
+        map_name,
+        adapter,
+        script_path,
+        text_path,
+        [
+            f"sourceBlock={block['label']}",
+            *(notes or []),
+        ],
+    )
+    source["coveredLabels"] = [block["label"]]
+    return {
+        "version": 1,
+        "kind": "conditionalDialogue",
+        "mapName": map_name,
+        "scriptLabel": f"{block['label']}ConditionalDialogue{priority}",
+        "sourceScriptLabel": block["label"],
+        "textConstant": text_constant,
+        "priority": priority,
+        "conditions": {
+            "requiresEvents": sorted(requires_flags),
+            "requiresEventsAbsent": sorted(requires_flags_absent),
+        },
+        "dialogueLabels": dialogue_labels,
+        "source": source,
+        "confidence": "adapter",
+    }
+
+
+def conditional_dialogue_rows_for_simple_flag_block(map_name, script_path, text_path, text_pointers, text_labels, block):
+    if has_conditional_dialogue_side_effects(block):
+        return []
+
+    text_constant = text_pointers.get(block["label"], "")
+    if not text_constant:
+        return []
+
+    clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+    branches = parse_flag_gated_dialogue(clean)
+    if not branches:
+        return []
+
+    text_refs = local_text_ref_map(block["raw"])
+    present_lines = script_label_lines(text_labels, text_refs, branches["present"])
+    absent_lines = script_label_lines(text_labels, text_refs, branches["absent"])
+    present_labels = dialogue_labels_for_branch(text_refs, branches["present"])
+    absent_labels = dialogue_labels_for_branch(text_refs, branches["absent"])
+    if not present_lines or not absent_lines or not present_labels or not absent_labels:
+        return []
+
+    return [
+        conditional_dialogue_row(
+            map_name,
+            script_path,
+            text_path,
+            block,
+            text_constant,
+            20,
+            [branches["event"]],
+            [],
+            present_labels,
+            "text_asm_flag_gated_dialogue_v1",
+            ["Generated from a dialogue-only text_asm with one CheckEvent branch."],
+        ),
+        conditional_dialogue_row(
+            map_name,
+            script_path,
+            text_path,
+            block,
+            text_constant,
+            10,
+            [],
+            [branches["event"]],
+            absent_labels,
+            "text_asm_flag_gated_dialogue_v1",
+            ["Generated from a dialogue-only text_asm with one CheckEvent branch."],
+        ),
+    ]
+
+
+def parse_nested_two_event_dialogue(clean):
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    try:
+        start = next(i for i, line in enumerate(lines) if line.startswith("CheckEvent "))
+    except StopIteration:
+        return None
+    lines = lines[start:]
+
+    def match_line(index, pattern):
+        if index >= len(lines):
+            return None
+        return re.match(pattern, lines[index])
+
+    def is_local_label(index, label):
+        return index < len(lines) and lines[index] in {label, f"{label}:"}
+
+    event1 = match_line(0, r"CheckEvent\s+(EVENT_\w+)$")
+    first_branch = match_line(1, r"jr\s+nz,\s+(\.\w+)$")
+    absent_label = match_line(2, r"ld\s+hl,\s+(\.\w+|\w+)$")
+    first_done = match_line(4, r"jr\s+(\.\w+)$")
+    if (
+        not event1
+        or not first_branch
+        or not absent_label
+        or lines[3] != "call PrintText"
+        or not first_done
+        or not is_local_label(5, first_branch.group(1))
+    ):
+        return None
+
+    event2 = match_line(6, r"CheckEventReuseA\s+(EVENT_\w+)$")
+    second_branch = match_line(7, r"jr\s+nz,\s+(\.\w+)$")
+    middle_label = match_line(8, r"ld\s+hl,\s+(\.\w+|\w+)$")
+    second_done = match_line(10, r"jr\s+(\.\w+)$")
+    if (
+        not event2
+        or not second_branch
+        or not middle_label
+        or lines[9] != "call PrintText"
+        or not second_done
+        or second_done.group(1) != first_done.group(1)
+        or not is_local_label(11, second_branch.group(1))
+    ):
+        return None
+
+    present_label = match_line(12, r"ld\s+hl,\s+(\.\w+|\w+)$")
+    if (
+        not present_label
+        or lines[13] != "call PrintText"
+        or not is_local_label(14, first_done.group(1))
+        or lines[15] != "jp TextScriptEnd"
+    ):
+        return None
+
+    return [
+        {
+            "priority": 300,
+            "requires": [],
+            "requiresAbsent": [event1.group(1)],
+            "label": absent_label.group(1),
+        },
+        {
+            "priority": 200,
+            "requires": [event1.group(1), event2.group(1)],
+            "requiresAbsent": [],
+            "label": present_label.group(1),
+        },
+        {
+            "priority": 100,
+            "requires": [event1.group(1)],
+            "requiresAbsent": [event2.group(1)],
+            "label": middle_label.group(1),
+        },
+    ]
+
+
+def conditional_dialogue_rows_for_nested_event_block(map_name, script_path, text_path, text_pointers, text_labels, block):
+    if has_conditional_dialogue_side_effects(block):
+        return []
+
+    text_constant = text_pointers.get(block["label"], "")
+    if not text_constant:
+        return []
+
+    clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+    branches = parse_nested_two_event_dialogue(clean)
+    if not branches:
+        return []
+
+    text_refs = local_text_ref_map(block["raw"])
+    rows = []
+    for branch in branches:
+        lines = script_label_lines(text_labels, text_refs, branch["label"])
+        labels = dialogue_labels_for_branch(text_refs, branch["label"])
+        if not lines or not labels:
+            return []
+        rows.append(
+            conditional_dialogue_row(
+                map_name,
+                script_path,
+                text_path,
+                block,
+                text_constant,
+                branch["priority"],
+                branch["requires"],
+                branch["requiresAbsent"],
+                labels,
+                "text_asm_nested_event_dialogue_v1",
+                ["Generated from a dialogue-only text_asm with nested CheckEvent/CheckEventReuseA branches."],
+            )
+        )
+    return rows
+
+
+def conditional_dialogue_rows_for_block(map_name, script_path, text_path, text_pointers, text_labels, block):
+    rows = conditional_dialogue_rows_for_nested_event_block(
+        map_name,
+        script_path,
+        text_path,
+        text_pointers,
+        text_labels,
+        block,
+    )
+    if rows:
+        return rows
+    return conditional_dialogue_rows_for_simple_flag_block(
+        map_name,
+        script_path,
+        text_path,
+        text_pointers,
+        text_labels,
+        block,
+    )
+
+
+def conditional_dialogue_rows():
+    rows = []
+    for script_path in sorted(SCRIPTS_DIR.glob("*.asm")):
+        map_name = script_path.stem
+        text_path = TEXT_DIR / f"{map_name}.asm"
+        script_content = script_path.read_text()
+        text_pointers = parse_text_pointer_map(script_content)
+        if not text_pointers:
+            continue
+        text_labels = extract_map_text_labels(map_name)
+        for block in extract_label_blocks(script_content):
+            rows.extend(
+                conditional_dialogue_rows_for_block(
+                    map_name,
+                    script_path,
+                    text_path,
+                    text_pointers,
+                    text_labels,
+                    block,
+                )
+            )
+    return rows
 
 
 def badge_name_from_bit(bit_name):
@@ -6323,7 +6735,7 @@ def cinnabar_lab_fossil_revival_candidates():
     map_name = "CinnabarLabFossilRoom"
     script_path = SCRIPTS_DIR / f"{map_name}.asm"
     text_path = TEXT_DIR / f"{map_name}.asm"
-    engine_path = PROJECT_ROOT / "pokemon-game-data/engine/events/cinnabar_lab.asm"
+    engine_path = CINNABAR_LAB_ENGINE_FILE
     if not script_path.exists() or not text_path.exists() or not engine_path.exists():
         return []
 
@@ -7250,7 +7662,7 @@ def indigo_plateau_lobby_map_load_reset_candidate():
     map_name = "IndigoPlateauLobby"
     script_path = SCRIPTS_DIR / f"{map_name}.asm"
     text_path = TEXT_DIR / f"{map_name}.asm"
-    constants_path = PROJECT_ROOT / "pokemon-game-data/constants/event_constants.asm"
+    constants_path = EVENT_CONSTANTS_FILE
     if not script_path.exists() or not constants_path.exists():
         return []
 
@@ -11300,6 +11712,30 @@ def insert_tile_override_candidate(cursor, candidate):
     )
 
 
+def insert_conditional_dialogue(cursor, row):
+    cursor.execute(
+        """
+        INSERT INTO script_event_conditional_dialogue (
+            text_constant, map_name, script_label, priority,
+            requires_flags_json, requires_flags_absent_json,
+            dialogue_labels_json, source_json, row_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row["textConstant"],
+            row["mapName"],
+            row["scriptLabel"],
+            row["priority"],
+            canonical_json(row["conditions"].get("requiresEvents", [])),
+            canonical_json(row["conditions"].get("requiresEventsAbsent", [])),
+            canonical_json(row.get("dialogueLabels", [])),
+            canonical_json(row.get("source", {})),
+            canonical_json(row),
+        ),
+    )
+
+
 def insert_boulder_target(cursor, target):
     cursor.execute(
         """
@@ -11399,6 +11835,22 @@ def generated_tile_override_diagnostic(candidate):
     }
 
 
+def generated_conditional_dialogue_diagnostic(row):
+    return {
+        "mapName": row["mapName"],
+        "scriptLabel": row["scriptLabel"],
+        "status": "generated",
+        "reason": row.get("source", {}).get("adapter", "conditional_dialogue_adapter"),
+        "details": {
+            "textConstant": row["textConstant"],
+            "priority": row["priority"],
+            "conditions": row.get("conditions", {}),
+            "dialogueLabels": row.get("dialogueLabels", []),
+            "source": row.get("source", {}),
+        },
+    }
+
+
 def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = create_tables(conn)
@@ -11412,6 +11864,7 @@ def main():
     for adapter in TILE_OVERRIDE_ADAPTERS:
         tile_override_candidates.extend(adapter())
     boulder_targets = victory_road_boulder_target_definitions()
+    conditional_dialogue = conditional_dialogue_rows()
 
     for block in sorted(ir_blocks, key=lambda row: (row["mapName"], row["label"])):
         insert_ir_block(cursor, block)
@@ -11425,12 +11878,16 @@ def main():
     for candidate in sorted(tile_override_candidates, key=lambda row: (row["mapName"], row["scriptLabel"])):
         insert_tile_override_candidate(cursor, candidate)
 
+    for row in sorted(conditional_dialogue, key=lambda row: (row["mapName"], row["textConstant"], -row["priority"], row["scriptLabel"])):
+        insert_conditional_dialogue(cursor, row)
+
     for target in sorted(boulder_targets, key=lambda row: (row["targetFamily"], row["mapName"], row["x"], row["y"])):
         insert_boulder_target(cursor, target)
 
     diagnostics = [generated_candidate_diagnostic(candidate) for candidate in candidates]
     diagnostics.extend(generated_trade_diagnostic(trade) for trade in trade_definitions)
     diagnostics.extend(generated_tile_override_diagnostic(candidate) for candidate in tile_override_candidates)
+    diagnostics.extend(generated_conditional_dialogue_diagnostic(row) for row in conditional_dialogue)
     boulder_diagnostics = boulder_target_runtime_diagnostics(boulder_targets)
     diagnostics.extend(boulder_diagnostics)
     spin_tile_diagnostics = spin_tile_runtime_diagnostics(conn)
@@ -11459,6 +11916,10 @@ def main():
     generated_labels.update(candidate["scriptLabel"] for candidate in tile_override_candidates)
     for candidate in tile_override_candidates:
         generated_labels.update(candidate.get("source", {}).get("coveredLabels", []))
+    generated_labels.update(row["scriptLabel"] for row in conditional_dialogue)
+    generated_labels.update(row.get("sourceScriptLabel", "") for row in conditional_dialogue)
+    for row in conditional_dialogue:
+        generated_labels.update(row.get("source", {}).get("coveredLabels", []))
     generated_labels.update(
         diagnostic["scriptLabel"]
         for diagnostic in boulder_diagnostics
@@ -11473,6 +11934,18 @@ def main():
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in pokemon_tower7f_rocket_exit_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in cinnabar_gym_default_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in name_rater_diagnostics)
+
+    text_asm_pointer_diagnostics = text_asm_text_pointer_diagnostics(generated_labels)
+    diagnostics.extend(text_asm_pointer_diagnostics)
+    generated_labels.update(
+        diagnostic["scriptLabel"]
+        for diagnostic in text_asm_pointer_diagnostics
+        if diagnostic["status"] in {"covered", "generated"}
+    )
+    for diagnostic in text_asm_pointer_diagnostics:
+        if diagnostic["status"] in {"covered", "generated"}:
+            generated_labels.update(diagnostic.get("details", {}).get("source", {}).get("coveredLabels", []))
+
     for block in sorted(ir_blocks, key=lambda row: (row["mapName"], row["label"])):
         diagnostic = diagnostic_for_ir_block(block, generated_labels)
         if diagnostic:
@@ -11490,9 +11963,11 @@ def main():
     TRADE_OUTPUT_PATH.write_text(json.dumps(trade_definitions, indent=2, sort_keys=True) + "\n")
     TILE_OUTPUT_PATH.write_text(json.dumps(tile_override_candidates, indent=2, sort_keys=True) + "\n")
     BOULDER_OUTPUT_PATH.write_text(json.dumps(boulder_targets, indent=2, sort_keys=True) + "\n")
+    CONDITIONAL_DIALOGUE_OUTPUT_PATH.write_text(json.dumps(conditional_dialogue, indent=2, sort_keys=True) + "\n")
     print(f"Script event candidates: {len(candidates)}")
     print(f"Script tile override candidates: {len(tile_override_candidates)}")
     print(f"Script boulder targets: {len(boulder_targets)}")
+    print(f"Script conditional dialogue rows: {len(conditional_dialogue)}")
     print(f"In-game trade definitions: {len(trade_definitions)}")
     print(f"Script IR blocks: {len(ir_blocks)}")
     print(f"Script diagnostics: {len(diagnostics)}")
@@ -11502,6 +11977,7 @@ def main():
     print(f"Trade JSON: {TRADE_OUTPUT_PATH}")
     print(f"Tile override JSON: {TILE_OUTPUT_PATH}")
     print(f"Boulder target JSON: {BOULDER_OUTPUT_PATH}")
+    print(f"Conditional dialogue JSON: {CONDITIONAL_DIALOGUE_OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

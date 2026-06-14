@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "./constants";
+import { fetchViewerJson, viewerUrl } from "./constants";
 
 export interface TileImageCacheEntry {
   key: string;
@@ -6,15 +6,14 @@ export interface TileImageCacheEntry {
 }
 
 export const getTileImageUrl = (tileId: number): string => {
-  return `${API_BASE_URL}/tile-image/${tileId}`;
+  const imageIndex = Math.max(0, tileId - 1);
+  return viewerUrl(`viewer-assets/tile_images/tile_${imageIndex}.png`);
 };
 
 export const fetchTileImages = async (): Promise<any[]> => {
-  const response = await fetch(`${API_BASE_URL}/tile-images`);
-  return await response.json();
+  return await fetchViewerJson<any[]>("viewer-data/tile-images.json");
 };
 
 export const fetchTiles = async (mapId: number): Promise<any[]> => {
-  const response = await fetch(`${API_BASE_URL}/tiles/${mapId}`);
-  return await response.json();
+  return await fetchViewerJson<any[]>(`viewer-data/tiles/${mapId}.json`);
 };

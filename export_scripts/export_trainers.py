@@ -18,15 +18,10 @@ Creates tables:
 import os
 import re
 import sqlite3
-from pathlib import Path
 
-# Constants
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-TRAINERS_DIR = PROJECT_ROOT / "pokemon-game-data/data/trainers"
-CONSTANTS_DIR = PROJECT_ROOT / "pokemon-game-data/constants"
-OBJECTS_DIR = PROJECT_ROOT / "pokemon-game-data/data/maps/objects"
-MOVE_CONSTANTS_FILE = CONSTANTS_DIR / "move_constants.asm"
+from config import CONSTANTS_DIR, DB_PATH, MAP_OBJECTS_DIR, MOVE_CONSTANTS_FILE, TRAINERS_DIR
+
+OBJECTS_DIR = MAP_OBJECTS_DIR
 
 
 def create_tables(conn):

@@ -1,5 +1,4 @@
 import { Scene } from "phaser";
-import { TileImageCacheEntry } from "../api";
 import { TILE_SIZE } from "../constants";
 
 export class MapRenderer {
@@ -106,7 +105,7 @@ export class MapRenderer {
       // Emit an event when the warp is clicked
       warpGraphics.on("pointerdown", () => {
         // Add a visual effect when clicking
-        const flashEffect = this.scene.tweens.add({
+        this.scene.tweens.add({
           targets: warpGraphics,
           alpha: { from: 0.5, to: 1 },
           duration: 150,
@@ -204,11 +203,11 @@ export class MapRenderer {
         let frame = 0;
         let flipX = false;
 
-        // If we have frame and flipX from the server, use those
+        // Exported actor data may include an explicit frame and flip state.
         if (npc.frame !== undefined && npc.flipX !== undefined) {
           frame = npc.frame;
           flipX = npc.flipX;
-          console.log(`Using server-provided frame: ${frame}, flipX: ${flipX}`);
+          console.log(`Using exported frame: ${frame}, flipX: ${flipX}`);
         } else {
           // Otherwise, get them from the NPC manager
           const npcManager = tileManager.getNpcManager();
@@ -310,9 +309,6 @@ export class MapRenderer {
       // Update the direction for the movement animation
       npcData.action_direction = direction;
 
-      // Try to get the TileManager from the scene
-      const tileManager = (this.scene as any).tileManager;
-
       // Create a movement tween for smooth animation
       this.scene.tweens.add({
         targets: npcSprite,
@@ -411,7 +407,7 @@ export class MapRenderer {
       // Create a temporary fallback sprite while we load the real one
       npcSprite = this.scene.add.sprite(posX, posY, "npc-fallback");
 
-      // If we have frame and flipX from the server, apply them directly
+      // If the exported actor includes frame data, apply it immediately.
       if (npc.frame !== undefined) {
         npcSprite.setFrame(npc.frame);
       }

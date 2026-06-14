@@ -1,6 +1,5 @@
-import { API_BASE_URL } from "./constants";
+import { fetchViewerJson } from "./constants";
 
 export const fetchItems = async (): Promise<any[]> => {
-  const response = await fetch(`${API_BASE_URL}/items`);
-  return await response.json();
+  return await fetchViewerJson<any[]>("viewer-data/items.json");
 };

@@ -28,14 +28,14 @@ Pipeline order matters! Key dependencies:
   15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
                                    and spin/arrow tile forced movement
  16. export_script_candidates.py - Structured candidates for script behaviors
+ 17. export_viewer_data.py       - Static JSON/assets for the offline Phaser viewer
 """
 import subprocess
 import os
 import sqlite3
 import sys
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from config import DB_PATH
 
 scripts = [
     # Map infrastructure (order-dependent)
@@ -56,6 +56,7 @@ scripts = [
     "export_hidden_objects.py",
     "export_map_scripts.py",
     "export_script_candidates.py",
+    "export_viewer_data.py",
 ]
 
 
@@ -78,6 +79,7 @@ def validate_generated_database(db_path):
         "script_event_in_game_trades",
         "script_event_tile_overrides",
         "script_event_boulder_targets",
+        "script_event_conditional_dialogue",
         "spin_tiles",
     ]
     conn = sqlite3.connect(db_path)
@@ -107,19 +109,18 @@ def main():
     for script in scripts:
         run_script(script)
 
-    db_path = PROJECT_ROOT / "pokemon.db"
-    if not db_path.exists():
-        print(f"!!! pokemon.db not found at {db_path}")
+    if not DB_PATH.exists():
+        print(f"!!! pokemon.db not found at {DB_PATH}")
         sys.exit(1)
-    if db_path.stat().st_size == 0:
-        print(f"!!! pokemon.db is empty at {db_path}")
+    if DB_PATH.stat().st_size == 0:
+        print(f"!!! pokemon.db is empty at {DB_PATH}")
         sys.exit(1)
-    validate_generated_database(db_path)
+    validate_generated_database(DB_PATH)
 
     print(f"\n{'='*60}")
     print("✅ All reprocessing steps completed successfully!")
     print(f"{'='*60}")
-    print(f"\nOutput: {db_path}")
+    print(f"\nOutput: {DB_PATH}")
 
 
 if __name__ == "__main__":

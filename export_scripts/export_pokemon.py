@@ -2,22 +2,9 @@ import os
 import re
 import sqlite3
 import glob
-from pathlib import Path
-import sys
 
-# Add the root directory to the Python path to allow imports from utils
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from utils.pokemon_utils import SPECIAL_NAME_MAPPINGS, normalize_pokemon_name
-
-# Constants
-# Get the project root directory (parent of the script's directory)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
-POKEMON_DATA_DIR = PROJECT_ROOT / "pokemon-game-data/data/pokemon"
-BASE_STATS_DIR = POKEMON_DATA_DIR / "base_stats"
-POKEDEX_CONSTANTS_FILE = (
-    PROJECT_ROOT / "pokemon-game-data/constants/pokedex_constants.asm"
-)
+from config import BASE_STATS_DIR, DB_PATH, POKEDEX_CONSTANTS_FILE, POKEMON_DATA_DIR
+from pokemon_names import SPECIAL_NAME_MAPPINGS, normalize_pokemon_name
 
 # Regular expressions
 DEX_ENTRY_PATTERN = re.compile(
@@ -33,9 +20,6 @@ EVOLVE_LEVEL_PATTERN = re.compile(r"\s*db EVOLVE_LEVEL, (\d+), (\w+)")
 EVOLVE_ITEM_PATTERN = re.compile(r"\s*db EVOLVE_ITEM, [^,]+, \d+, (\w+)")
 EVOLVE_TRADE_PATTERN = re.compile(r"\s*db EVOLVE_TRADE, \d+, (\w+)")
 CRY_PATTERN = re.compile(r"\s*mon_cry [^,]+, \$([0-9A-F]+), \$([0-9A-F]+) ; (.+)$")
-
-# Special character name mappings - Removed and imported from utils.pokemon_utils
-
 
 def create_database():
     """Create SQLite database and tables"""
