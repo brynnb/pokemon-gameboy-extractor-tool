@@ -8,7 +8,7 @@ maintenance notes.
 
 This repo extracts Pokemon Red/Blue data from the `pokemon-game-data`
 submodule, which tracks source files from the `pokered` disassembly. It does
-not ship ROM data.
+not include a Pokemon ROM image.
 
 Generated artifacts are source data for downstream tools and games. They are
 not runtime persistence databases, and they are intentionally project-neutral.

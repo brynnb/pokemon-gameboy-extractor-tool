@@ -7,7 +7,8 @@ tile, object, trainer, encounter, item, move, Pokemon, dialogue, and script
 source data.
 
 The extractor is project-neutral. It does not know about any downstream game
-repo, does not copy files into one, and does not ship ROM data.
+repo and does not copy files into one. It does not include a Pokemon ROM image;
+it reads source/data files from the `pokemon-game-data` submodule.
 
 ![Pokemon overworld viewer demo](https://github.com/user-attachments/assets/e4602729-29bb-4ee4-94f6-446c90dd2a89)
 
