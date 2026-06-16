@@ -19,7 +19,10 @@ EVOS_PATTERN = re.compile(
 EVOLVE_LEVEL_PATTERN = re.compile(r"\s*db EVOLVE_LEVEL, (\d+), (\w+)")
 EVOLVE_ITEM_PATTERN = re.compile(r"\s*db EVOLVE_ITEM, [^,]+, \d+, (\w+)")
 EVOLVE_TRADE_PATTERN = re.compile(r"\s*db EVOLVE_TRADE, \d+, (\w+)")
-CRY_PATTERN = re.compile(r"\s*mon_cry [^,]+, \$([0-9A-F]+), \$([0-9A-F]+) ; (.+)$")
+CRY_PATTERN = re.compile(
+    r"\s*mon_cry\s+SFX_CRY_([0-9A-F]{2}),\s+\$([0-9A-F]+),\s+\$([0-9A-F]+)\s*;\s*(.+)$",
+    re.IGNORECASE,
+)
 
 def create_database():
     """Create SQLite database and tables"""
@@ -179,12 +182,12 @@ def extract_cries():
             if "mon_cry" in line:
                 match = CRY_PATTERN.search(line)
                 if match:
-                    pitch, length, name = match.groups()
+                    base_cry, pitch, length, name = match.groups()
                     name = name.strip()  # Strip any whitespace
                     normalized_name = normalize_pokemon_name(name)
 
                     cries[normalized_name] = {
-                        "base_cry": 0,  # Using 0 as a placeholder
+                        "base_cry": int(base_cry, 16),
                         "cry_pitch": int(pitch, 16),
                         "cry_length": int(length, 16),
                     }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import SCRIPTS_DIR, TEXT_DIR
+from config import DB_PATH, SCRIPTS_DIR, TEXT_DIR
 from export_map_scripts import parse_spin_tiles
 from export_script_candidates import (
     badge_gated_gym_guide_candidates,
@@ -45,6 +45,7 @@ from export_script_candidates import (
     mt_moon_fossil_choice_candidates,
     name_rater_runtime_diagnostics,
     oak_intro_runtime_diagnostics,
+    object_visibility_rule_candidates,
     pallet_daisy_map_load_runtime_diagnostics,
     pewter_city_escort_candidates,
     pokemon_mansion_switch_candidates,
@@ -69,9 +70,12 @@ from export_script_candidates import (
     ss_anne_2f_rival_candidate,
     silph_co_9f_nurse_candidates,
     simple_flag_side_effect_dialogue_candidates,
+    simple_item_gift_candidates,
+    simple_play_cry_text_candidates,
     snorlax_wake_battle_candidates,
     SCRIPTS_DIR,
     spin_tile_runtime_diagnostics,
+    story_item_reward_candidates,
     strip_comment,
     trainer_after_battle_flag_runtime_diagnostics,
     trainer_after_battle_flag_side_effect_candidates,
@@ -264,6 +268,43 @@ class LancesRoomDefaultCandidateTest(unittest.TestCase):
         self.assertEqual(walk["actions"][1]["movements"][:3], ["UP", "UP", "UP"])
 
 
+class SimplePlayCryTextCandidateTest(unittest.TestCase):
+    def test_generates_dialogue_then_species_cry(self):
+        candidates = {
+            candidate["scriptLabel"]: candidate
+            for candidate in simple_play_cry_text_candidates()
+        }
+
+        candidate = candidates["PewterNidoranHouseNidoranTextCry"]
+        self.assertEqual(candidate["mapName"], "PewterNidoranHouse")
+        self.assertEqual(candidate["trigger"]["label"], "TEXT_PEWTERNIDORANHOUSE_NIDORAN")
+        self.assertEqual(
+            candidate["actions"],
+            [
+                {"type": "lockInput"},
+                {"type": "dialogueText", "textConstant": "TEXT_PEWTERNIDORANHOUSE_NIDORAN"},
+                {"type": "playCry", "pokemonConstant": "NIDORAN_M"},
+                {"type": "unlockInput"},
+            ],
+        )
+        self.assertEqual(candidate["source"]["adapter"], "simple_play_cry_text_v1")
+
+    def test_handles_shared_cry_helper_and_extra_text(self):
+        candidates = {
+            candidate["scriptLabel"]: candidate
+            for candidate in simple_play_cry_text_candidates()
+        }
+
+        meowth = candidates["CeladonMansion1FMeowthTextCry"]
+        self.assertEqual(meowth["actions"][2], {"type": "playCry", "pokemonConstant": "MEOWTH"})
+
+        machop = candidates["VermilionCityMachopTextCry"]
+        self.assertEqual(machop["trigger"]["label"], "TEXT_VERMILIONCITY_MACHOP")
+        self.assertEqual(machop["actions"][2], {"type": "playCry", "pokemonConstant": "MACHOP"})
+        self.assertEqual(machop["actions"][3]["type"], "dialogue")
+        assert_dialogue_contains(self, machop["actions"][3]["lines"], "stomping the")
+
+
 class ParseSpinTilesTest(unittest.TestCase):
     def test_parse_spin_tiles_preserves_source_xy_order(self):
         content = """
@@ -453,11 +494,19 @@ class ViridianOldManCatchTutorialCandidateTest(unittest.TestCase):
     def test_generates_inverted_choice_and_old_man_weedle_battle(self):
         candidates = viridian_old_man_catch_tutorial_candidate()
 
-        self.assertEqual(len(candidates), 1)
-        candidate = candidates[0]
+        self.assertEqual(len(candidates), 2)
+        by_label = {candidate["scriptLabel"]: candidate for candidate in candidates}
+
+        candidate = by_label["ViridianCityOldManCatchDemo"]
         self.assertEqual(candidate["scriptLabel"], "ViridianCityOldManCatchDemo")
         self.assertEqual(candidate["trigger"]["label"], "TEXT_VIRIDIANCITY_OLD_MAN")
-        self.assertEqual(candidate["conditions"], {"requiresEvent": "EVENT_GOT_POKEDEX"})
+        self.assertEqual(
+            candidate["conditions"],
+            {
+                "requiresEvent": "EVENT_GOT_POKEDEX",
+                "requiresEventAbsent": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE",
+            },
+        )
 
         choice = candidate["actions"][1]
         self.assertEqual(choice["type"], "choice")
@@ -466,13 +515,59 @@ class ViridianOldManCatchTutorialCandidateTest(unittest.TestCase):
         self.assertIn("Time is money", choice["yesLines"][0])
         self.assertIn("I see you're using", choice["noLines"][0])
 
-        battle = candidate["actions"][2]
+        gift = candidate["actions"][2]
+        self.assertEqual(gift["type"], "giveItem")
+        self.assertEqual(gift["itemConstant"], "POKE_BALL")
+        self.assertEqual(gift["quantity"], 1)
+
+        battle = candidate["actions"][3]
         self.assertEqual(battle["type"], "startWildBattle")
         self.assertEqual(battle["pokemonConstant"], "WEEDLE")
         self.assertEqual(battle["level"], 5)
+        self.assertEqual(battle["allowedActions"], ["item"])
+        self.assertTrue(battle["guaranteedCatch"])
         assert_dialogue_contains(self, battle["postWinActions"][0]["lines"], "First, you need")
+        self.assertEqual(
+            battle["postWinActions"][1],
+            {"type": "setEvent", "event": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE"},
+        )
         self.assertEqual(candidate["source"]["adapter"], "viridian_old_man_catch_tutorial_v1")
         self.assertIn("ViridianCityOldManEndCatchTrainingScript", candidate["source"]["coveredLabels"])
+
+        done = by_label["ViridianCityOldManCatchDemoDone"]
+        self.assertEqual(done["trigger"]["label"], "TEXT_VIRIDIANCITY_OLD_MAN")
+        self.assertEqual(done["conditions"], {"requiresEvent": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE"})
+        self.assertEqual(done["actions"][1]["type"], "dialogue")
+        assert_dialogue_contains(self, done["actions"][1]["lines"], "First, you need")
+
+
+class ScriptSoundActionCandidateTest(unittest.TestCase):
+    def test_story_item_reward_preserves_key_item_sound_macro(self):
+        candidates = {
+            candidate["scriptLabel"]: candidate
+            for candidate in story_item_reward_candidates()
+        }
+
+        parcel = candidates["ViridianMartOaksParcel"]
+        self.assertEqual(parcel["trigger"]["type"], "npc_click")
+        self.assertEqual(parcel["trigger"]["label"], "TEXT_VIRIDIANMART_CLERK")
+        self.assertEqual(parcel["conditions"]["requiresEvent"], "EVENT_OAK_ASKED_TO_CHOOSE_MON")
+        self.assertIn(
+            {"type": "playSFX", "sfxConstant": "SFX_GET_KEY_ITEM"},
+            parcel["actions"],
+        )
+
+    def test_simple_item_gift_preserves_received_item_sound_macro(self):
+        candidates = {
+            candidate["scriptLabel"]: candidate
+            for candidate in simple_item_gift_candidates()
+        }
+
+        tm41 = candidates["CeladonCityGramps3TextGift"]
+        self.assertIn(
+            {"type": "playSFX", "sfxConstant": "SFX_GET_ITEM_1"},
+            tm41["actions"],
+        )
 
 
 class BadgeOrEventGatedDialogueCandidateTest(unittest.TestCase):
@@ -837,6 +932,63 @@ TestDirectObject:
                 {"op": "ShowObject", "object": "HS_OTHER_OBJECT", "source": "direct"},
             ],
         )
+
+
+class ObjectVisibilityRuleCandidateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = sqlite3.connect(DB_PATH)
+        cls.rules = object_visibility_rule_candidates(cls.conn, extract_script_ir())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def rule_by_source_object_event(self, script_label, object_key, requires_event):
+        for rule in self.rules:
+            if (
+                rule["scriptLabel"] == script_label
+                and rule["objectKey"] == object_key
+                and rule["requiresEvent"] == requires_event
+            ):
+                return rule
+        self.fail(f"missing rule {script_label} {object_key} {requires_event}")
+
+    def test_oak_pokedex_delivery_generates_viridian_old_man_swap(self):
+        sleepy = self.rule_by_source_object_event(
+            "OaksLabOakGivesPokedexScript",
+            "HS_LYING_OLD_MAN",
+            "EVENT_GOT_POKEDEX",
+        )
+        awake = self.rule_by_source_object_event(
+            "OaksLabOakGivesPokedexScript",
+            "HS_OLD_MAN",
+            "EVENT_GOT_POKEDEX",
+        )
+
+        self.assertEqual(sleepy["mapName"], "VIRIDIAN_CITY")
+        self.assertEqual(sleepy["objectName"], "ViridianCity_NPC_5")
+        self.assertFalse(sleepy["visible"])
+        self.assertEqual(awake["mapName"], "VIRIDIAN_CITY")
+        self.assertEqual(awake["objectName"], "ViridianCity_NPC_7")
+        self.assertTrue(awake["visible"])
+
+    def test_visibility_rules_use_nearby_event_group(self):
+        wrong_switch_rules = [
+            rule
+            for rule in self.rules
+            if rule["scriptLabel"] == "VictoryRoad3FDefaultScript"
+            and rule["objectKey"] == "HS_VICTORY_ROAD_2F_BOULDER"
+            and rule["requiresEvent"] == "EVENT_VICTORY_ROAD_3_BOULDER_ON_SWITCH1"
+        ]
+        self.assertEqual(wrong_switch_rules, [])
+
+        right_switch = self.rule_by_source_object_event(
+            "VictoryRoad3FDefaultScript",
+            "HS_VICTORY_ROAD_2F_BOULDER",
+            "EVENT_VICTORY_ROAD_3_BOULDER_ON_SWITCH2",
+        )
+        self.assertTrue(right_switch["visible"])
 
 
 class PureFlagMapScriptCandidateTest(unittest.TestCase):

@@ -17,21 +17,12 @@ import re
 import sqlite3
 
 from config import DB_PATH, GLOBAL_TEXT_DIR, MAP_OBJECTS_DIR, SCRIPTS_DIR, TEXT_DIR
+from text_tokens import normalize_game_text_tokens
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
 
 # Text assembly macros that contain dialogue content
 TEXT_MACROS = {"text", "line", "cont", "para", "page", "next"}
-# Special tokens in the original game
-SPECIAL_TOKENS = {
-    "<PLAYER>": "{PLAYER}",
-    "<RIVAL>": "{RIVAL}",
-    "#MON": "POKéMON",
-    "POKé": "POKé",
-    "#": "POKé",
-}
-
-
 def create_tables(conn):
     """Create the dialogue-related tables."""
     cursor = conn.cursor()
@@ -123,9 +114,7 @@ def parse_dialogue_string(lines, start_idx):
             match = re.match(pattern, raw)
             if match:
                 text_content = match.group(1)
-                # Apply special token replacements
-                for token, replacement in SPECIAL_TOKENS.items():
-                    text_content = text_content.replace(token, replacement)
+                text_content = normalize_game_text_tokens(text_content)
 
                 if macro == "text":
                     if parts:

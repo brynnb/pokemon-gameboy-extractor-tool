@@ -28,7 +28,9 @@ Pipeline order matters! Key dependencies:
   15. export_map_scripts.py      - Map scripts, NPC movement, event flags, coordinate triggers, warp events
                                    and spin/arrow tile forced movement
  16. export_script_candidates.py - Structured candidates for script behaviors
- 17. export_viewer_data.py       - Static JSON/assets for the offline Phaser viewer
+ 17. export_audio_manifest.py    - Source constants, asset paths, map music,
+                                   move SFX, and Pokémon cry metadata
+ 18. export_viewer_data.py       - Static JSON/assets for the offline Phaser viewer
 """
 import subprocess
 import os
@@ -56,6 +58,7 @@ scripts = [
     "export_hidden_objects.py",
     "export_map_scripts.py",
     "export_script_candidates.py",
+    "export_audio_manifest.py",
     "export_viewer_data.py",
 ]
 
@@ -79,6 +82,7 @@ def validate_generated_database(db_path):
         "script_event_in_game_trades",
         "script_event_tile_overrides",
         "script_event_boulder_targets",
+        "script_event_object_visibility",
         "script_event_conditional_dialogue",
         "spin_tiles",
     ]

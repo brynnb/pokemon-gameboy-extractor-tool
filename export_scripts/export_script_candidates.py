@@ -24,12 +24,14 @@ from config import (
     SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH,
     SCRIPT_EVENT_DIAGNOSTICS_PATH,
     SCRIPT_EVENT_IR_PATH,
+    SCRIPT_EVENT_OBJECT_VISIBILITY_PATH,
     SCRIPT_EVENT_TILE_OVERRIDES_PATH,
     SCRIPT_EVENT_TRADES_PATH,
     SCRIPTS_DIR,
     TEXT_DIR,
     TRADES_FILE,
 )
+from text_tokens import normalize_game_text_tokens
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
 OUTPUT_PATH = SCRIPT_EVENT_CANDIDATES_PATH
@@ -38,6 +40,7 @@ DIAGNOSTICS_OUTPUT_PATH = SCRIPT_EVENT_DIAGNOSTICS_PATH
 TRADE_OUTPUT_PATH = SCRIPT_EVENT_TRADES_PATH
 TILE_OUTPUT_PATH = SCRIPT_EVENT_TILE_OVERRIDES_PATH
 BOULDER_OUTPUT_PATH = SCRIPT_EVENT_BOULDER_TARGETS_PATH
+OBJECT_VISIBILITY_OUTPUT_PATH = SCRIPT_EVENT_OBJECT_VISIBILITY_PATH
 CONDITIONAL_DIALOGUE_OUTPUT_PATH = SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH
 
 
@@ -49,6 +52,7 @@ def create_tables(conn):
     cursor.execute("DROP TABLE IF EXISTS script_event_in_game_trades")
     cursor.execute("DROP TABLE IF EXISTS script_event_tile_overrides")
     cursor.execute("DROP TABLE IF EXISTS script_event_boulder_targets")
+    cursor.execute("DROP TABLE IF EXISTS script_event_object_visibility")
     cursor.execute("DROP TABLE IF EXISTS script_event_conditional_dialogue")
     cursor.execute(
         """
@@ -156,6 +160,23 @@ def create_tables(conn):
     )
     cursor.execute(
         """
+        CREATE TABLE script_event_object_visibility (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            map_name TEXT NOT NULL,
+            map_id INTEGER NOT NULL,
+            object_name TEXT NOT NULL,
+            object_key TEXT NOT NULL,
+            script_label TEXT NOT NULL,
+            requires_event TEXT NOT NULL,
+            visible INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            rule_json TEXT NOT NULL,
+            UNIQUE(map_id, object_name, requires_event, visible, label)
+        )
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE script_event_conditional_dialogue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             text_constant TEXT NOT NULL,
@@ -176,12 +197,7 @@ def create_tables(conn):
 
 def normalize_text(text):
     text = re.sub(r"¥(\d+)", r"\1 Pokedollars", text)
-    return (
-        text.replace("#MON", "POKEMON")
-        .replace("# BALL", "POKE BALL")
-        .replace("<PLAYER>", "(PLAYER)")
-        .rstrip("@")
-    )
+    return normalize_game_text_tokens(text).replace("{PLAYER}", "(PLAYER)").rstrip("@")
 
 
 def append_text_macro_page(pages, current_lines):
@@ -1001,6 +1017,74 @@ def ordered_text_refs(raw_asm):
     return re.findall(r"\btext_far\s+_?(\w+)", clean)
 
 
+TEXT_SOUND_MACRO_TO_SFX = {
+    "sound_get_item_1": "SFX_GET_ITEM_1",
+    "sound_get_item_1_duplicate": "SFX_GET_ITEM_1",
+    "sound_get_item_2": "SFX_GET_ITEM_2",
+    "sound_get_key_item": "SFX_GET_KEY_ITEM",
+    "sound_level_up": "SFX_LEVEL_UP",
+    "sound_pokedex_rating": "SFX_POKEDEX_RATING",
+    "sound_caught_mon": "SFX_CAUGHT_MON",
+}
+
+
+def sound_actions_for_raw(raw_asm):
+    actions = []
+    clean_lines = [strip_comment(line) for line in raw_asm.splitlines()]
+    for index, line in enumerate(clean_lines):
+        if not line:
+            continue
+        macro = line.split(maxsplit=1)[0]
+        if macro in TEXT_SOUND_MACRO_TO_SFX:
+            actions.append({"type": "playSFX", "sfxConstant": TEXT_SOUND_MACRO_TO_SFX[macro]})
+            continue
+
+        sfx_load = re.fullmatch(r"ld\s+a,\s+(SFX_[A-Z0-9_]+)", line)
+        if not sfx_load:
+            continue
+        lookahead = "\n".join(clean_lines[index + 1 : index + 4])
+        if re.search(r"\bcall\s+PlaySound(?:WaitForCurrent)?\b", lookahead):
+            actions.append({"type": "playSFX", "sfxConstant": sfx_load.group(1)})
+
+    deduped = []
+    for action in actions:
+        if deduped and deduped[-1] == action:
+            continue
+        deduped.append(action)
+    return deduped
+
+
+def local_label_section_raw(raw_asm, local_label):
+    lines = []
+    active = False
+    for raw_line in raw_asm.splitlines():
+        stripped = strip_comment(raw_line)
+        if re.match(r"^(\.\w+):?$", stripped):
+            if active:
+                break
+            active = stripped.rstrip(":") == local_label
+            continue
+        if active:
+            lines.append(raw_line)
+    return "\n".join(lines)
+
+
+def sound_actions_for_script_text_ref(ref, blocks_by_label, container_raw=""):
+    if ref.startswith("."):
+        return sound_actions_for_raw(local_label_section_raw(container_raw, ref))
+    block = blocks_by_label.get(ref)
+    if not block:
+        return []
+    return sound_actions_for_raw(block["raw"])
+
+
+def sound_actions_for_text_constant(text_constant, all_const_map, blocks_by_label):
+    label = all_const_map.get(text_constant)
+    if not label:
+        return []
+    return sound_actions_for_script_text_ref(label, blocks_by_label)
+
+
 def lines_for_labels(text_labels, labels):
     lines = []
     for label in labels:
@@ -1315,6 +1399,7 @@ def simple_item_gift_candidate_for_block(map_name, script_path, text_path, text_
             "quantity": item.get("quantity", 1),
         }
     )
+    gift_actions.extend(sound_actions_for_raw(block["raw"]))
     gift_actions.append({"type": "setEvent", "event": event_flag})
     gift_actions.append({"type": "unlockInput"})
 
@@ -2353,7 +2438,10 @@ def viridian_old_man_catch_tutorial_candidate():
                 "label": text_constant,
                 "sourceLabel": "ViridianCityOldManText",
             },
-            "conditions": {"requiresEvent": "EVENT_GOT_POKEDEX"},
+            "conditions": {
+                "requiresEvent": "EVENT_GOT_POKEDEX",
+                "requiresEventAbsent": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE",
+            },
             "actions": [
                 {"type": "lockInput"},
                 {
@@ -2365,14 +2453,37 @@ def viridian_old_man_catch_tutorial_candidate():
                     "noLines": tutorial_lines,
                     "continueOnNo": True,
                 },
+                {"type": "giveItem", "itemConstant": "POKE_BALL", "quantity": 1},
                 {
                     "type": "startWildBattle",
                     "pokemonConstant": "WEEDLE",
                     "level": 5,
+                    "allowedActions": ["item"],
+                    "guaranteedCatch": True,
                     "postWinActions": [
-                        {"type": "dialogue", "speaker": "OLD MAN", "lines": followup_lines}
+                        {"type": "dialogue", "speaker": "OLD MAN", "lines": followup_lines},
+                        {"type": "setEvent", "event": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE"},
                     ],
                 },
+                {"type": "unlockInput"},
+            ],
+            "source": source,
+            "confidence": "adapter",
+        },
+        {
+            "version": 1,
+            "kind": "scriptEventCandidate",
+            "mapName": map_name,
+            "scriptLabel": "ViridianCityOldManCatchDemoDone",
+            "trigger": {
+                "type": "npc_click",
+                "label": text_constant,
+                "sourceLabel": "ViridianCityOldManText",
+            },
+            "conditions": {"requiresEvent": "EVENT_OLD_MAN_CATCH_TUTORIAL_DONE"},
+            "actions": [
+                {"type": "lockInput"},
+                {"type": "dialogue", "speaker": "OLD MAN", "lines": followup_lines},
                 {"type": "unlockInput"},
             ],
             "source": source,
@@ -4001,6 +4112,147 @@ def simple_flag_side_effect_dialogue_candidates():
 
 def script_label_base(label):
     return re.sub(r"[^A-Za-z0-9]+", "", label)
+
+
+def simple_play_cry_candidate_for_block(
+    map_name,
+    script_path,
+    text_path,
+    text_pointers,
+    text_labels,
+    cry_helper_labels,
+    block,
+):
+    clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+    text_constant = text_pointers.get(block["label"])
+    if not text_constant:
+        return []
+
+    extra_label_match = re.search(r"\bld\s+hl,\s+(\.\w+)\s*\n\s*ret\b", clean)
+    text_refs = ordered_text_refs(block["raw"])
+    if len(text_refs) == 0 or len(text_refs) > 2:
+        return []
+    if len(text_refs) == 2 and not extra_label_match:
+        return []
+
+    ir = extract_features(block["label"], block["raw"])
+    features = ir["features"]
+    if (
+        features["hasChoice"]
+        or features["hasGiveItem"]
+        or features["hasGivePokemon"]
+        or features["hasMoneyCheck"]
+        or features["hasTrainerBattle"]
+        or features["hasWildBattle"]
+    ):
+        return []
+    if ir["eventRefs"] or ir["movementRefs"] or ir["objectRefs"] or ir["warpRefs"]:
+        return []
+
+    call_targets = re.findall(r"\bcall\s+(\w+)", clean)
+    allowed_calls = {"PrintText", "PlayCry", "WaitForSoundToFinish"}
+    if any(target not in allowed_calls for target in call_targets):
+        return []
+    if re.search(r"\b(?:jr|predef|farcall|DisplayTextID|YesNoChoice)\b", clean):
+        return []
+
+    extra_lines = []
+    if re.search(r"\bret\b", clean):
+        if not extra_label_match:
+            return []
+        text_ref_map = local_text_ref_map(block["raw"])
+        extra_lines = local_lines(text_labels, text_ref_map, extra_label_match.group(1))
+        if not extra_lines:
+            return []
+
+    pokemon_constant = ""
+    cry_match = re.search(r"\bld\s+a,\s+([A-Z0-9_]+)\s*\n\s*call\s+PlayCry\b", clean)
+    if cry_match:
+        pokemon_constant = cry_match.group(1)
+    else:
+        helper_match = re.search(r"\bld\s+a,\s+([A-Z0-9_]+)\s*\n\s*jp\s+(\w+)\b", clean)
+        if not helper_match or helper_match.group(2) not in cry_helper_labels:
+            return []
+        pokemon_constant = helper_match.group(1)
+
+    helper_jumps = set(re.findall(r"\bjp\s+(\w+)\b", clean)) - {"TextScriptEnd"}
+    if helper_jumps - cry_helper_labels:
+        return []
+
+    if not pokemon_constant:
+        return []
+
+    source = source_metadata(
+        map_name,
+        "simple_play_cry_text_v1",
+        script_path,
+        text_path,
+        [
+            "Generated for direct text_asm blocks that print one text label and play one Pokemon cry.",
+            "Branching/stateful PlayCry scripts are intentionally left for more specific adapters.",
+        ],
+    )
+    source["coveredLabels"] = [block["label"]]
+    actions = [
+        {"type": "lockInput"},
+        {"type": "dialogueText", "textConstant": text_constant},
+        {"type": "playCry", "pokemonConstant": pokemon_constant},
+    ]
+    if extra_lines:
+        actions.append({"type": "dialogue", "lines": extra_lines})
+    actions.append({"type": "unlockInput"})
+
+    return [
+        {
+            "version": 1,
+            "kind": "scriptEventCandidate",
+            "mapName": map_name,
+            "scriptLabel": f"{script_label_base(block['label'])}Cry",
+            "trigger": {
+                "type": "npc_click",
+                "label": text_constant,
+                "sourceLabel": block["label"],
+            },
+            "conditions": {},
+            "actions": actions,
+            "source": source,
+            "confidence": "adapter",
+        }
+    ]
+
+
+def simple_play_cry_text_candidates():
+    candidates = []
+    for script_path in sorted(SCRIPTS_DIR.glob("*.asm")):
+        map_name = script_path.stem
+        text_path = TEXT_DIR / f"{map_name}.asm"
+        if not text_path.exists():
+            continue
+        script_content = script_path.read_text()
+        text_pointers = parse_text_pointer_map(script_content)
+        if not text_pointers:
+            continue
+        text_labels = extract_map_text_labels(map_name)
+        cry_helper_labels = {
+            block["label"]
+            for block in extract_label_blocks(script_content)
+            if "call PlayCry" in block["raw"]
+            and "text_far" not in block["raw"]
+            and "text_asm" not in block["raw"]
+        }
+        for block in extract_label_blocks(script_content):
+            candidates.extend(
+                simple_play_cry_candidate_for_block(
+                    map_name,
+                    script_path,
+                    text_path,
+                    text_pointers,
+                    text_labels,
+                    cry_helper_labels,
+                    block,
+                )
+            )
+    return candidates
 
 
 def pure_flag_map_script_candidate_for_block(map_name, script_path, text_path, block):
@@ -7053,9 +7305,10 @@ def story_item_reward_specs():
         {
             "mapName": "ViridianMart",
             "blockLabel": "ViridianMartOaksParcelScript",
-            "scriptLabel": "ViridianMartOaksParcelReward",
-            "triggerType": "map_script",
-            "triggerLabel": "ViridianMartOaksParcelScript",
+            "scriptLabel": "ViridianMartOaksParcel",
+            "triggerType": "npc_click",
+            "triggerLabel": "TEXT_VIRIDIANMART_CLERK",
+            "requiresEvent": "EVENT_OAK_ASKED_TO_CHOOSE_MON",
             "requiresEventAbsent": "EVENT_GOT_OAKS_PARCEL",
             "requiredSnippets": [
                 "TEXT_VIRIDIANMART_CLERK_PARCEL_QUEST",
@@ -7063,6 +7316,7 @@ def story_item_reward_specs():
                 "SetEvent EVENT_GOT_OAKS_PARCEL",
             ],
             "actions": [
+                {"kind": "dialogueTextConstant", "textConstant": "TEXT_VIRIDIANMART_CLERK_YOU_CAME_FROM_PALLET_TOWN"},
                 {"kind": "dialogueTextConstant", "textConstant": "TEXT_VIRIDIANMART_CLERK_PARCEL_QUEST", "hydrateItem": "OAKS_PARCEL"},
                 {"kind": "giveItem", "item": "OAKS_PARCEL", "quantity": 1},
                 {"kind": "setEvent", "event": "EVENT_GOT_OAKS_PARCEL"},
@@ -7212,6 +7466,7 @@ def story_item_reward_candidate_for_spec(spec):
             if not lines:
                 return []
             actions.append({"type": "dialogue", "lines": lines})
+            actions.extend(sound_actions_for_script_text_ref(action["ref"], blocks_by_label, block["raw"]))
             if not action["ref"].startswith("."):
                 covered_labels.add(action["ref"])
         elif kind == "dialogueTextConstant":
@@ -7221,6 +7476,7 @@ def story_item_reward_candidate_for_spec(spec):
             if not lines:
                 return []
             actions.append({"type": "dialogue", "lines": lines})
+            actions.extend(sound_actions_for_text_constant(action["textConstant"], all_const_map, blocks_by_label))
             if label := all_const_map.get(action["textConstant"]):
                 covered_labels.add(label)
         elif kind in {"giveItem", "takeItem"}:
@@ -9395,6 +9651,146 @@ def missable_object_actions(clean):
     return actions
 
 
+def indexed_progression_events_and_object_actions(raw):
+    clean_lines = [strip_comment(line) for line in raw.splitlines()]
+    events = []
+    objects = []
+    idx = 0
+    while idx < len(clean_lines):
+        line = clean_lines[idx]
+        event_match = re.fullmatch(r"(SetEvent|CheckAndSetEvent)\s+(EVENT_[A-Z0-9_]+)", line)
+        if event_match:
+            events.append(
+                {
+                    "index": idx,
+                    "op": event_match.group(1),
+                    "flag": event_match.group(2),
+                }
+            )
+
+        direct_match = re.fullmatch(r"(HideObject|ShowObject)\s+(HS_[A-Z0-9_]+)", line)
+        if direct_match:
+            objects.append(
+                {
+                    "index": idx,
+                    "op": direct_match.group(1),
+                    "object": direct_match.group(2),
+                }
+            )
+
+        object_match = re.fullmatch(r"ld\s+a,\s+(HS_[A-Z0-9_]+)", line)
+        if object_match and idx + 2 < len(clean_lines):
+            if re.fullmatch(r"ld\s+\[wMissableObjectIndex\],\s+a", clean_lines[idx + 1]):
+                op_match = re.fullmatch(r"predef(?:_jump)?\s+(HideObject|ShowObject)", clean_lines[idx + 2])
+                if op_match:
+                    objects.append(
+                        {
+                            "index": idx + 2,
+                            "op": op_match.group(1),
+                            "object": object_match.group(1),
+                        }
+                    )
+                    idx += 2
+        idx += 1
+    return events, objects
+
+
+def nearby_progression_flags(object_index, events):
+    if not events:
+        return []
+
+    previous = [event for event in events if event["index"] < object_index]
+    if previous:
+        flags = []
+        cursor = len(previous) - 1
+        last_index = previous[cursor]["index"]
+        while cursor >= 0:
+            event = previous[cursor]
+            if last_index - event["index"] > len(flags):
+                break
+            flags.append(event["flag"])
+            cursor -= 1
+        return unique_sorted(flags)
+
+    following = [event for event in events if event["index"] > object_index]
+    if not following:
+        return []
+    flags = []
+    first_index = following[0]["index"]
+    for event in following:
+        if event["index"] - first_index > len(flags):
+            break
+        flags.append(event["flag"])
+    return unique_sorted(flags)
+
+
+def missable_object_lookup(conn):
+    rows = conn.execute(
+        """
+        SELECT hs_constant, map_constant, map_id, object_name
+        FROM missable_objects
+        WHERE object_name IS NOT NULL AND object_name <> ''
+        """
+    )
+    return {
+        hs_constant: {
+            "mapName": map_constant,
+            "mapId": map_id,
+            "objectName": object_name,
+        }
+        for hs_constant, map_constant, map_id, object_name in rows
+    }
+
+
+def object_visibility_rule_candidates(conn, ir_blocks):
+    missables = missable_object_lookup(conn)
+    candidates = []
+    seen = set()
+    for block in ir_blocks:
+        events, objects = indexed_progression_events_and_object_actions(block["rawAsm"])
+        if not events or not objects:
+            continue
+        for obj in objects:
+            missable = missables.get(obj["object"])
+            if not missable:
+                continue
+            flags = nearby_progression_flags(obj["index"], events)
+            if not flags:
+                continue
+            visible = obj["op"] == "ShowObject"
+            for flag in flags:
+                label = f"{block['label']}:{flag}:{obj['object']}:{obj['op']}"
+                key = (missable["mapId"], missable["objectName"], flag, visible, label)
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(
+                    {
+                        "version": 1,
+                        "kind": "objectVisibility",
+                        "mapName": missable["mapName"],
+                        "mapId": missable["mapId"],
+                        "objectName": missable["objectName"],
+                        "objectKey": obj["object"],
+                        "visible": visible,
+                        "requiresEvent": flag,
+                        "label": label,
+                        "sourceMapName": block["mapName"],
+                        "scriptLabel": block["label"],
+                        "confidence": "adapter",
+                        "source": {
+                            "adapter": "flagged_missable_object_visibility_v1",
+                            "sourceLabel": block["label"],
+                            "sourceMapName": block["mapName"],
+                            "objectOperation": obj["op"],
+                            "objectKey": obj["object"],
+                            "requiresEvent": flag,
+                        },
+                    }
+                )
+    return candidates
+
+
 def multi_event_actions(clean):
     actions = []
     for raw_line in clean.splitlines():
@@ -11552,6 +11948,7 @@ ADAPTERS = [
     badge_gated_gym_guide_candidates,
     badge_or_event_gated_dialogue_candidates,
     facing_up_dialogue_candidates,
+    simple_play_cry_text_candidates,
     fan_boast_toggle_candidates,
     simple_flag_side_effect_dialogue_candidates,
     pure_flag_map_script_candidates,
@@ -11763,6 +12160,29 @@ def insert_boulder_target(cursor, target):
     )
 
 
+def insert_object_visibility_rule(cursor, rule):
+    cursor.execute(
+        """
+        INSERT INTO script_event_object_visibility (
+            map_name, map_id, object_name, object_key, script_label,
+            requires_event, visible, label, rule_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            rule["mapName"],
+            rule["mapId"],
+            rule["objectName"],
+            rule["objectKey"],
+            rule["scriptLabel"],
+            rule["requiresEvent"],
+            1 if rule["visible"] else 0,
+            rule["label"],
+            canonical_json(rule),
+        ),
+    )
+
+
 def insert_diagnostic(cursor, diagnostic):
     cursor.execute(
         """
@@ -11835,6 +12255,25 @@ def generated_tile_override_diagnostic(candidate):
     }
 
 
+def generated_object_visibility_diagnostic(rule):
+    return {
+        "mapName": rule["sourceMapName"],
+        "scriptLabel": rule["scriptLabel"],
+        "status": "generated",
+        "reason": rule.get("source", {}).get("adapter", "object_visibility_adapter"),
+        "details": {
+            "mapName": rule["mapName"],
+            "mapId": rule["mapId"],
+            "objectName": rule["objectName"],
+            "objectKey": rule["objectKey"],
+            "visible": rule["visible"],
+            "requiresEvent": rule["requiresEvent"],
+            "label": rule["label"],
+            "source": rule.get("source", {}),
+        },
+    }
+
+
 def generated_conditional_dialogue_diagnostic(row):
     return {
         "mapName": row["mapName"],
@@ -11864,6 +12303,7 @@ def main():
     for adapter in TILE_OVERRIDE_ADAPTERS:
         tile_override_candidates.extend(adapter())
     boulder_targets = victory_road_boulder_target_definitions()
+    object_visibility_rules = object_visibility_rule_candidates(conn, ir_blocks)
     conditional_dialogue = conditional_dialogue_rows()
 
     for block in sorted(ir_blocks, key=lambda row: (row["mapName"], row["label"])):
@@ -11884,9 +12324,13 @@ def main():
     for target in sorted(boulder_targets, key=lambda row: (row["targetFamily"], row["mapName"], row["x"], row["y"])):
         insert_boulder_target(cursor, target)
 
+    for rule in sorted(object_visibility_rules, key=lambda row: (row["mapName"], row["objectName"], row["requiresEvent"], row["label"])):
+        insert_object_visibility_rule(cursor, rule)
+
     diagnostics = [generated_candidate_diagnostic(candidate) for candidate in candidates]
     diagnostics.extend(generated_trade_diagnostic(trade) for trade in trade_definitions)
     diagnostics.extend(generated_tile_override_diagnostic(candidate) for candidate in tile_override_candidates)
+    diagnostics.extend(generated_object_visibility_diagnostic(rule) for rule in object_visibility_rules)
     diagnostics.extend(generated_conditional_dialogue_diagnostic(row) for row in conditional_dialogue)
     boulder_diagnostics = boulder_target_runtime_diagnostics(boulder_targets)
     diagnostics.extend(boulder_diagnostics)
@@ -11916,6 +12360,7 @@ def main():
     generated_labels.update(candidate["scriptLabel"] for candidate in tile_override_candidates)
     for candidate in tile_override_candidates:
         generated_labels.update(candidate.get("source", {}).get("coveredLabels", []))
+    generated_labels.update(rule["scriptLabel"] for rule in object_visibility_rules)
     generated_labels.update(row["scriptLabel"] for row in conditional_dialogue)
     generated_labels.update(row.get("sourceScriptLabel", "") for row in conditional_dialogue)
     for row in conditional_dialogue:
@@ -11963,10 +12408,12 @@ def main():
     TRADE_OUTPUT_PATH.write_text(json.dumps(trade_definitions, indent=2, sort_keys=True) + "\n")
     TILE_OUTPUT_PATH.write_text(json.dumps(tile_override_candidates, indent=2, sort_keys=True) + "\n")
     BOULDER_OUTPUT_PATH.write_text(json.dumps(boulder_targets, indent=2, sort_keys=True) + "\n")
+    OBJECT_VISIBILITY_OUTPUT_PATH.write_text(json.dumps(object_visibility_rules, indent=2, sort_keys=True) + "\n")
     CONDITIONAL_DIALOGUE_OUTPUT_PATH.write_text(json.dumps(conditional_dialogue, indent=2, sort_keys=True) + "\n")
     print(f"Script event candidates: {len(candidates)}")
     print(f"Script tile override candidates: {len(tile_override_candidates)}")
     print(f"Script boulder targets: {len(boulder_targets)}")
+    print(f"Script object visibility rules: {len(object_visibility_rules)}")
     print(f"Script conditional dialogue rows: {len(conditional_dialogue)}")
     print(f"In-game trade definitions: {len(trade_definitions)}")
     print(f"Script IR blocks: {len(ir_blocks)}")
@@ -11977,6 +12424,7 @@ def main():
     print(f"Trade JSON: {TRADE_OUTPUT_PATH}")
     print(f"Tile override JSON: {TILE_OUTPUT_PATH}")
     print(f"Boulder target JSON: {BOULDER_OUTPUT_PATH}")
+    print(f"Object visibility JSON: {OBJECT_VISIBILITY_OUTPUT_PATH}")
     print(f"Conditional dialogue JSON: {CONDITIONAL_DIALOGUE_OUTPUT_PATH}")
 
 

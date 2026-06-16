@@ -54,7 +54,10 @@ npm run viewer:build
 - Node/npm for package scripts and the Phaser viewer.
 - Python 3 for extraction scripts.
 - Pillow from `requirements.txt`.
-- RGBDS, specifically `rgbgfx`, for tileset conversion.
+- RGBDS, specifically `rgbgfx`, for tileset conversion. Source-audio rendering
+  also uses `rgbasm`, `rgblink`, and `rgbfix`.
+- `gbsplay` and `oggenc` if you want to render browser-playable audio assets
+  from `audio_manifest.json`.
 
 Install RGBDS:
 
@@ -80,6 +83,7 @@ Generated and ignored outputs:
 - `script_event_in_game_trades.json`
 - `script_event_ir.json`
 - `script_event_diagnostics.json`
+- `audio_manifest.json`
 - `export_scripts/tile_images/*.png`
 - `pokemon-phaser/public/viewer-data/**`
 - `pokemon-phaser/public/viewer-assets/**`
@@ -114,7 +118,8 @@ artifacts.
 14. `export_hidden_objects.py`
 15. `export_map_scripts.py`
 16. `export_script_candidates.py`
-17. `export_viewer_data.py`
+17. `export_audio_manifest.py`
+18. `export_viewer_data.py`
 
 The order matters:
 
@@ -125,7 +130,34 @@ The order matters:
 - items must exist before visible item balls can resolve `item_id`
 - objects, text, trainers, hidden/missable objects, and map scripts must exist
   before script candidates can be generated
+- Pokemon, moves, hidden objects, and map music must exist before audio metadata
+  can join Pokemon cries, move SFX, and map music constants
 - viewer JSON/assets are generated last from the completed SQLite database
+
+## Audio Manifest And Rendering
+
+`export_audio_manifest.py` emits `audio_manifest.json`, a project-neutral index
+of Red/Blue music constants, SFX constants, map music assignments, move SFX, and
+Pokemon cry metadata. The manifest uses stable browser paths such as
+`/sound/pokemon/music/pallet_town.ogg` but does not render or copy files by
+itself.
+
+To render OGG assets from the source audio engine:
+
+```bash
+npm run render:audio -- --build-rom --kind music --out-dir rendered-audio --seconds 90 --fade 3
+npm run render:audio -- --build-rom --kind sfx --out-dir rendered-audio --seconds 6 --fade 0
+npm run render:audio -- --build-rom --kind cries --out-dir rendered-audio --seconds 4 --fade 0
+```
+
+`--kind cries` renders species-specific cry files with each Pokemon's source
+pitch and length modifiers applied. `--kind base-cries` renders the raw shared
+base cry constants for debugging or fallback assets.
+
+`--build-rom` creates a temporary audio-only Game Boy ROM per constant, runs it
+through `gbsplay`, and encodes the WAV output with `oggenc`. This avoids needing
+a full game ROM build and keeps the extractor neutral; downstream projects
+choose their own `--out-dir`.
 
 Running individual scripts is useful for debugging, but many scripts depend on
 tables created by earlier stages.

@@ -22,6 +22,8 @@ it reads source/data files from the `pokemon-game-data` submodule.
 - `script_event_in_game_trades.json`: source in-game trade definitions.
 - `script_event_ir.json` and `script_event_diagnostics.json`: script inventory
   and coverage diagnostics.
+- `audio_manifest.json`: source music, SFX, map music, move sound, and Pokemon
+  cry metadata with stable browser asset paths.
 - `export_scripts/tile_images/*.png`: generated 16x16 tile PNGs.
 - `pokemon-phaser/public/viewer-data/**`: generated static JSON for the viewer.
 - `pokemon-phaser/public/viewer-assets/**`: copied tile and sprite PNGs for the
@@ -54,7 +56,8 @@ If the submodule is missing:
 git submodule update --init --recursive
 ```
 
-Install RGBDS so `rgbgfx` is available for tileset conversion:
+Install RGBDS so `rgbgfx` is available for tileset conversion and `rgbasm`,
+`rgblink`, and `rgbfix` are available for source-audio rendering:
 
 ```bash
 # macOS
@@ -89,6 +92,27 @@ npm run export
 ```
 
 That runs `export_scripts/reprocess.py`.
+
+## Render Audio
+
+`audio_manifest.json` describes source audio constants and their browser asset
+paths. To render actual OGG files from the original audio engine, install
+`gbsplay` and `oggenc`, then run:
+
+```bash
+npm run render:audio -- --build-rom --kind music --out-dir rendered-audio --seconds 90 --fade 3
+npm run render:audio -- --build-rom --kind sfx --out-dir rendered-audio --seconds 6 --fade 0
+npm run render:audio -- --build-rom --kind cries --out-dir rendered-audio --seconds 4 --fade 0
+```
+
+`--kind cries` renders one OGG per Pokemon species using the source cry
+constant plus that species' original pitch and length modifiers. Use
+`--kind base-cries` only when you need the raw shared cry constants.
+
+The `--build-rom` mode builds a tiny temporary Game Boy ROM for each requested
+constant using the source audio engine, renders it with `gbsplay`, and encodes
+the result as OGG. The output root is intentionally caller-controlled; this repo
+does not copy files into downstream projects.
 
 ## World Viewer
 
@@ -133,6 +157,9 @@ script candidate model, viewer data, validation, and maintenance roadmap.
 ## Important Files
 
 - `export_scripts/reprocess.py`: canonical full pipeline.
+- `export_scripts/export_audio_manifest.py`: source audio metadata exporter.
+- `export_scripts/render_audio_assets.py`: source audio renderer.
+- `export_scripts/build_audio_rom.py`: temporary audio-only ROM builder.
 - `export_scripts/export_viewer_data.py`: static viewer JSON/asset exporter.
 - `export_scripts/*.py`: individual extractors.
 - `DOCUMENTATION.md`: full project documentation.

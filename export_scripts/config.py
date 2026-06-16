@@ -9,6 +9,10 @@ GAME_DATA_ROOT = PROJECT_ROOT / "pokemon-game-data"
 DATA_DIR = GAME_DATA_ROOT / "data"
 CONSTANTS_DIR = GAME_DATA_ROOT / "constants"
 GFX_DIR = GAME_DATA_ROOT / "gfx"
+AUDIO_DIR = GAME_DATA_ROOT / "audio"
+AUDIO_HEADERS_DIR = AUDIO_DIR / "headers"
+AUDIO_MUSIC_DIR = AUDIO_DIR / "music"
+AUDIO_SFX_DIR = AUDIO_DIR / "sfx"
 
 MAPS_DIR = GAME_DATA_ROOT / "maps"
 MAP_DATA_DIR = DATA_DIR / "maps"
@@ -52,6 +56,7 @@ POKEDEX_CONSTANTS_FILE = CONSTANTS_DIR / "pokedex_constants.asm"
 POKEMON_CONSTANTS_FILE = CONSTANTS_DIR / "pokemon_constants.asm"
 SCRIPT_CONSTANTS_FILE = CONSTANTS_DIR / "script_constants.asm"
 EVENT_CONSTANTS_FILE = CONSTANTS_DIR / "event_constants.asm"
+MUSIC_CONSTANTS_FILE = CONSTANTS_DIR / "music_constants.asm"
 
 EVOS_MOVES_FILE = POKEMON_DATA_DIR / "evos_moves.asm"
 COLLISION_TILE_IDS_FILE = TILESET_DATA_DIR / "collision_tile_ids.asm"
@@ -64,9 +69,11 @@ SCRIPT_EVENT_DIAGNOSTICS_PATH = PROJECT_ROOT / "script_event_diagnostics.json"
 SCRIPT_EVENT_TRADES_PATH = PROJECT_ROOT / "script_event_in_game_trades.json"
 SCRIPT_EVENT_TILE_OVERRIDES_PATH = PROJECT_ROOT / "script_event_tile_overrides.json"
 SCRIPT_EVENT_BOULDER_TARGETS_PATH = PROJECT_ROOT / "script_event_boulder_targets.json"
+SCRIPT_EVENT_OBJECT_VISIBILITY_PATH = PROJECT_ROOT / "script_event_object_visibility.json"
 SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH = (
     PROJECT_ROOT / "script_event_conditional_dialogue.json"
 )
+AUDIO_MANIFEST_PATH = PROJECT_ROOT / "audio_manifest.json"
 
 # Some Red/Blue tilesets share blockset/graphics data under a different ID.
 TILESET_BLOCKSET_ALIASES = {

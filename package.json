@@ -6,6 +6,7 @@
         "generate": "./generate.sh",
         "export": "python3 export_scripts/reprocess.py",
         "export:script-candidates": "python3 export_scripts/export_script_candidates.py",
+        "render:audio": "python3 export_scripts/render_audio_assets.py",
         "viewer": "cd pokemon-phaser && npm run dev",
         "viewer:build": "cd pokemon-phaser && npm run build",
         "start": "npm run viewer",
