@@ -383,6 +383,26 @@ def parse_text_pointer_map(script_content):
     return pointers
 
 
+def parse_text_pointer_entries(script_content):
+    entries = []
+    in_table = False
+    for raw_line in script_content.splitlines():
+        stripped = strip_comment(raw_line)
+        if stripped == "def_text_pointers":
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        if not stripped:
+            continue
+        match = re.match(r"dw_const\s+(\w+),\s+(TEXT_\w+)", stripped)
+        if match:
+            entries.append({"label": match.group(1), "textConstant": match.group(2)})
+            continue
+        break
+    return entries
+
+
 def parse_dw_const_map(script_content):
     pointers = {}
     for raw_line in script_content.splitlines():
@@ -421,6 +441,8 @@ def extract_label_blocks(content):
 def detect_block_kind(label, raw_asm):
     if "trainer " in raw_asm or "TalkToTrainer" in raw_asm:
         return "trainer"
+    if "script_prize_vendor" in raw_asm:
+        return "text_script"
     if "Script" in label:
         return "script"
     if re.search(r"\b(?:db|dw)\s+NPC_MOVEMENT_", raw_asm) or label.endswith("Movement"):
@@ -517,6 +539,7 @@ def extract_features(label, raw_asm):
         "hasGivePokemon": "GivePokemon" in clean,
         "hasMoneyCheck": "HasEnoughMoney" in clean,
         "hasTextAsm": "text_asm" in clean,
+        "hasScriptPrizeVendor": "script_prize_vendor" in clean,
         "hasTrainerBattle": len(battle_refs) > 0 and any(ref["type"] == "trainer" for ref in battle_refs),
         "hasWildBattle": len(battle_refs) > 0 and any(ref["type"] == "wild" for ref in battle_refs),
         "movementCommands": movement_commands,
@@ -585,6 +608,7 @@ def interesting_ir_block(block):
         or features["hasGiveItem"]
         or features["hasGivePokemon"]
         or features["hasMoneyCheck"]
+        or features["hasScriptPrizeVendor"]
         or features["hasTrainerBattle"]
         or features["hasWildBattle"]
         or len(block["eventRefs"]) > 0
@@ -624,6 +648,8 @@ def diagnostic_for_ir_block(block, generated_labels):
         reasons.append("wild_battle")
     if features["hasMoneyCheck"]:
         reasons.append("money_check")
+    if features.get("hasScriptPrizeVendor"):
+        reasons.append("prize_vendor")
     if block["eventRefs"]:
         reasons.append("event_flags")
     if block["movementRefs"]:
@@ -6119,6 +6145,73 @@ def game_corner_coin_purchase_candidates():
             "confidence": "adapter",
         },
     ]
+
+
+def game_corner_prize_vendor_candidates():
+    map_name = "GameCornerPrizeRoom"
+    script_path = SCRIPTS_DIR / f"{map_name}.asm"
+    text_path = TEXT_DIR / f"{map_name}.asm"
+    if not script_path.exists():
+        return []
+
+    script_content = script_path.read_text()
+    blocks_by_label = {block["label"]: block for block in extract_label_blocks(script_content)}
+    pointer_entries = parse_text_pointer_entries(script_content)
+
+    candidates = []
+    covered_text_constants = []
+    for entry in pointer_entries:
+        label = entry["label"]
+        text_constant = entry["textConstant"]
+        block = blocks_by_label.get(label)
+        if not block:
+            continue
+        clean = "\n".join(strip_comment(line) for line in block["raw"].splitlines())
+        if "script_prize_vendor" not in clean:
+            continue
+
+        vendor_match = re.search(r"_PRIZE_VENDOR_(\d+)$", text_constant)
+        if not vendor_match:
+            continue
+        prize_window = int(vendor_match.group(1))
+        covered_text_constants.append(text_constant)
+        candidates.append(
+            {
+                "version": 1,
+                "kind": "scriptEventCandidate",
+                "mapName": map_name,
+                "scriptLabel": f"GameCornerPrizeRoomPrizeVendor{prize_window}",
+                "trigger": {
+                    "type": "npc_click",
+                    "label": text_constant,
+                    "sourceLabel": label,
+                },
+                "actions": [
+                    {
+                        "type": "gameCornerPrizeVendor",
+                        "textConstant": text_constant,
+                        "prizeWindow": prize_window,
+                    }
+                ],
+                "source": source_metadata(
+                    map_name,
+                    "game_corner_prize_vendor_v1",
+                    script_path,
+                    text_path,
+                    notes=[
+                        "Generated from script_prize_vendor/TX_SCRIPT_PRIZE_VENDOR text scripts.",
+                        "Duplicate text pointers are preserved because the original room has three prize counters sharing one script label.",
+                    ],
+                ),
+                "confidence": "adapter",
+            }
+        )
+
+    for candidate in candidates:
+        candidate["source"]["coveredLabels"] = unique_sorted(
+            [candidate["trigger"]["sourceLabel"], candidate["trigger"]["label"], *covered_text_constants]
+        )
+    return candidates
 
 
 def silph_co_9f_nurse_candidates():
@@ -11967,6 +12060,7 @@ ADAPTERS = [
     vermilion_ss_anne_guard_candidates,
     elite_four_room_entrance_guard_candidates,
     game_corner_coin_purchase_candidates,
+    game_corner_prize_vendor_candidates,
     silph_co_9f_nurse_candidates,
     game_corner_npc_coin_gift_candidates,
     cinnabar_gym_trainer_text_candidates,
