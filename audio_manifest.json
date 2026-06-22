@@ -1699,6 +1699,24 @@
       "shortName": "MIRROR_MOVE",
       "tempo": 32
     },
+    "12": {
+      "moveId": 12,
+      "moveName": "GUILLOTINE",
+      "path": "/sound/pokemon/sfx/battle_0f.ogg",
+      "pitch": 0,
+      "sfx": "SFX_BATTLE_0F",
+      "shortName": "GUILLOTINE",
+      "tempo": 128
+    },
+    "120": {
+      "moveId": 120,
+      "moveName": "SELFDESTRUCT",
+      "path": "/sound/pokemon/sfx/battle_34.ogg",
+      "pitch": 0,
+      "sfx": "SFX_BATTLE_34",
+      "shortName": "SELFDESTRUCT",
+      "tempo": 128
+    },
     "121": {
       "moveId": 121,
       "moveName": "EGG BOMB",
@@ -1743,6 +1761,15 @@
       "sfx": "SFX_BATTLE_32",
       "shortName": "BONE_CLUB",
       "tempo": 128
+    },
+    "126": {
+      "moveId": 126,
+      "moveName": "FIRE BLAST",
+      "path": "/sound/pokemon/sfx/battle_29.ogg",
+      "pitch": 31,
+      "sfx": "SFX_BATTLE_29",
+      "shortName": "FIRE_BLAST",
+      "tempo": 32
     },
     "127": {
       "moveId": 127,
@@ -1906,6 +1933,15 @@
       "shortName": "LOVELY_KISS",
       "tempo": 16
     },
+    "143": {
+      "moveId": 143,
+      "moveName": "SKY ATTACK",
+      "path": "/sound/pokemon/sfx/battle_25.ogg",
+      "pitch": 72,
+      "sfx": "SFX_BATTLE_25",
+      "shortName": "SKY_ATTACK",
+      "tempo": 255
+    },
     "144": {
       "moveId": 144,
       "moveName": "TRANSFORM",
@@ -1994,6 +2030,15 @@
       "pitch": 240,
       "sfx": "SFX_SUPER_EFFECTIVE",
       "shortName": "CRABHAMMER",
+      "tempo": 255
+    },
+    "153": {
+      "moveId": 153,
+      "moveName": "EXPLOSION",
+      "path": "/sound/pokemon/sfx/battle_34.ogg",
+      "pitch": 16,
+      "sfx": "SFX_BATTLE_34",
+      "shortName": "EXPLOSION",
       "tempo": 255
     },
     "154": {
@@ -2194,6 +2239,15 @@
       "shortName": "DOUBLE_KICK",
       "tempo": 64
     },
+    "25": {
+      "moveId": 25,
+      "moveName": "MEGA KICK",
+      "path": "/sound/pokemon/sfx/super_effective.ogg",
+      "pitch": 0,
+      "sfx": "SFX_SUPER_EFFECTIVE",
+      "shortName": "MEGA_KICK",
+      "tempo": 128
+    },
     "26": {
       "moveId": 26,
       "moveName": "JUMP KICK",
@@ -2218,7 +2272,7 @@
       "path": "/sound/pokemon/sfx/battle_1b.ogg",
       "pitch": 1,
       "sfx": "SFX_BATTLE_1B",
-      "shortName": "SAND-ATTACK",
+      "shortName": "SAND_ATTACK",
       "tempo": 160
     },
     "29": {
@@ -2256,6 +2310,15 @@
       "sfx": "SFX_BATTLE_1E",
       "shortName": "FURY_ATTACK",
       "tempo": 64
+    },
+    "32": {
+      "moveId": 32,
+      "moveName": "HORN DRILL",
+      "path": "/sound/pokemon/sfx/horn_drill.ogg",
+      "pitch": 0,
+      "sfx": "SFX_HORN_DRILL",
+      "shortName": "HORN_DRILL",
+      "tempo": 160
     },
     "33": {
       "moveId": 33,
@@ -2308,7 +2371,7 @@
       "path": "/sound/pokemon/sfx/super_effective.ogg",
       "pitch": 32,
       "sfx": "SFX_SUPER_EFFECTIVE",
-      "shortName": "DOUBLE-EDGE",
+      "shortName": "DOUBLE_EDGE",
       "tempo": 192
     },
     "39": {
@@ -2482,6 +2545,15 @@
       "shortName": "WATER_GUN",
       "tempo": 96
     },
+    "56": {
+      "moveId": 56,
+      "moveName": "HYDRO PUMP",
+      "path": "/sound/pokemon/sfx/battle_2a.ogg",
+      "pitch": 0,
+      "sfx": "SFX_BATTLE_2A",
+      "shortName": "HYDRO_PUMP",
+      "tempo": 128
+    },
     "57": {
       "moveId": 57,
       "moveName": "SURF",
@@ -2499,6 +2571,15 @@
       "sfx": "SFX_BATTLE_28",
       "shortName": "ICE_BEAM",
       "tempo": 128
+    },
+    "59": {
+      "moveId": 59,
+      "moveName": "BLIZZARD",
+      "path": "/sound/pokemon/sfx/battle_29.ogg",
+      "pitch": 240,
+      "sfx": "SFX_BATTLE_29",
+      "shortName": "BLIZZARD",
+      "tempo": 224
     },
     "6": {
       "moveId": 6,
@@ -2534,6 +2615,15 @@
       "pitch": 0,
       "sfx": "SFX_BATTLE_28",
       "shortName": "AURORA_BEAM",
+      "tempo": 128
+    },
+    "63": {
+      "moveId": 63,
+      "moveName": "HYPER BEAM",
+      "path": "/sound/pokemon/sfx/battle_36.ogg",
+      "pitch": 0,
+      "sfx": "SFX_BATTLE_36",
+      "shortName": "HYPER_BEAM",
       "tempo": 128
     },
     "64": {
@@ -2796,6 +2886,15 @@
       "sfx": "SFX_BATTLE_0D",
       "shortName": "THUNDERPUNCH",
       "tempo": 160
+    },
+    "90": {
+      "moveId": 90,
+      "moveName": "FISSURE",
+      "path": "/sound/pokemon/sfx/battle_29.ogg",
+      "pitch": 17,
+      "sfx": "SFX_BATTLE_29",
+      "shortName": "FISSURE",
+      "tempo": 32
     },
     "91": {
       "moveId": 91,
