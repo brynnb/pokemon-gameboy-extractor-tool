@@ -107,9 +107,11 @@ paths and are materialized below the selected renderer output directory.
 
 ### Graphics catalog
 
-The database now catalogs every file in the pinned `gfx` source tree, its
-format/category/hash/size, palettes where available, authored same-stem preview
-links, and deterministic PNG derivations for every supported planar source.
+The database now catalogs every version-controlled or non-ignored file in the
+pinned `gfx` source tree, its format/category/hash/size, palettes where
+available, authored same-stem preview links, and deterministic PNG derivations
+for every authored planar source. Git-ignored compiler intermediates are
+deliberately excluded so clean and previously built checkouts agree.
 Use `graphic_derivations` to walk from raw bytes to a generated PNG; do not
 infer a copied asset from a filename convention alone.
 
@@ -141,6 +143,15 @@ Candidate actions, candidate conditions, candidate references, and IR
 references also have normalized relationship tables. Consumers can migrate
 away from JSON-only queries without losing the JSON transport representation.
 
+CaptureQuest consumers should use the separately versioned
+`pokemon-gameboy-adapt-capturequest` command rather than reading compatibility
+scalar columns or applying mappings inside the canonical exporter. Its v1
+contract negotiates extractor schema v2, requires an explicit Red/Blue release,
+uses normalized default moves and scripts, and leaves `last-map` destinations
+dynamic. It also transports the current relational world, item, evolution,
+learnset, trainer, text, hidden-object, map-event, and special-rule inputs, so
+new consumers do not need to fall back to compatibility scalar columns.
+
 ### Release and provenance metadata
 
 New tables record Red/Blue release rows, one deterministic extraction run, both
@@ -150,6 +161,10 @@ where exported rows expose source paths. `extracted_tables` and
 conservative upstream source set, including derived tables without a single
 exact source path. This replaces relying on a filename or database modification
 time to identify an artifact.
+
+Run identity also includes `extractor_tree_sha256` and
+`extractor_worktree_dirty`, so consumers can distinguish a release produced by
+a modified generator from one produced by the same clean Git revision.
 
 ## Publication behavior
 

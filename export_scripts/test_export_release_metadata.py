@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -214,6 +215,59 @@ class ReleaseMetadataExportTest(unittest.TestCase):
                 conn.execute("SELECT applied_epoch FROM schema_metadata").fetchone()[0],
                 12345,
             )
+
+    def test_extractor_fingerprint_tracks_generator_changes_not_generated_outputs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            source_root = project_root / "source"
+            source_root.mkdir()
+            (source_root / "alpha.asm").write_text("db 1\n", encoding="utf-8")
+            generator = project_root / "generator.py"
+            generator.write_text("VERSION = 1\n", encoding="utf-8")
+            generated = project_root / "pokemon.db"
+            generated.write_bytes(b"old generated output")
+            subprocess.run(["git", "init", "-q"], cwd=project_root, check=True)
+            subprocess.run(["git", "add", "."], cwd=project_root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Extractor Test",
+                    "-c",
+                    "user.email=extractor@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                cwd=project_root,
+                check=True,
+            )
+
+            clean_hash, clean_dirty = metadata.extractor_worktree_state(
+                project_root, source_root
+            )
+            self.assertFalse(clean_dirty)
+
+            generator.write_text("VERSION = 2\n", encoding="utf-8")
+            changed_hash, changed_dirty = metadata.extractor_worktree_state(
+                project_root, source_root
+            )
+            self.assertTrue(changed_dirty)
+            self.assertNotEqual(changed_hash, clean_hash)
+
+            subprocess.run(
+                ["git", "restore", "generator.py"], cwd=project_root, check=True
+            )
+            generated.write_bytes(b"different generated output")
+            staged = project_root / (
+                ".pokemon.db." + ("a" * 32) + ".stage"
+            )
+            staged.write_bytes(b"transient generated output")
+            generated_hash, generated_dirty = metadata.extractor_worktree_state(
+                project_root, source_root
+            )
+            self.assertFalse(generated_dirty)
+            self.assertEqual(generated_hash, clean_hash)
 
     def test_constraints_and_validator_reject_tampering(self):
         with tempfile.TemporaryDirectory() as temp_dir:

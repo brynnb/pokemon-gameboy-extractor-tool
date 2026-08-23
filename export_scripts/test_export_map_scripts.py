@@ -7,7 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import DB_PATH, SCRIPTS_DIR, TEXT_DIR
+from config import SCRIPTS_DIR, TEXT_DIR
+from export_hidden_objects import parse_missable_objects
+from export_map import load_map_constants
 from export_map_scripts import parse_spin_tiles
 from export_script_candidates import (
     badge_gated_gym_guide_candidates,
@@ -988,12 +990,53 @@ TestDirectObject:
 class ObjectVisibilityRuleCandidateTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.conn = sqlite3.connect(DB_PATH)
-        cls.rules = object_visibility_rule_candidates(cls.conn, extract_script_ir())
+        cls.conn = sqlite3.connect(":memory:")
+        cls.addClassCleanup(cls.conn.close)
+        cls.conn.execute(
+            """
+            CREATE TABLE objects (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                map_id INTEGER,
+                object_type TEXT NOT NULL
+            )
+            """
+        )
+        cls.conn.execute(
+            """
+            CREATE TABLE missable_objects (
+                hs_constant TEXT NOT NULL PRIMARY KEY,
+                map_constant TEXT NOT NULL,
+                map_id INTEGER NOT NULL,
+                object_name TEXT,
+                object_type TEXT
+            )
+            """
+        )
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.conn.close()
+        map_ids = {
+            name: definition["id"]
+            for name, definition in load_map_constants().items()
+        }
+        source_rows = parse_missable_objects(cls.conn.cursor(), map_ids)
+        cls.conn.executemany(
+            """
+            INSERT INTO missable_objects (
+                hs_constant, map_constant, map_id, object_name, object_type
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["hs_constant"],
+                    row["map_constant"],
+                    row["map_id"],
+                    row["object_name"],
+                    row["object_type"],
+                )
+                for row in source_rows
+            ],
+        )
+        cls.rules = object_visibility_rule_candidates(cls.conn, extract_script_ir())
 
     def rule_by_source_object_event(self, script_label, object_key, requires_event):
         for rule in self.rules:
@@ -1498,13 +1541,20 @@ class VermilionSSAnneGuardCandidateTest(unittest.TestCase):
             passed["conditions"],
             {
                 "requiresPlayerFacing": "DOWN",
-                "requiresEventAbsent": "EVENT_SS_ANNE_LEFT",
+                "requiresEventsAbsent": [
+                    "EVENT_SS_ANNE_LEFT",
+                    "EVENT_PASSED_SS_ANNE_GUARD",
+                ],
                 "requiresItem": "S_S_TICKET",
             },
         )
         assert_dialogue_contains(self, passed["actions"][1]["lines"], "Welcome to S.S.")
         assert_dialogue_contains(self, passed["actions"][1]["lines"], "(PLAYER) flashed")
         assert_dialogue_contains(self, passed["actions"][1]["lines"], "the S.S.TICKET!")
+        self.assertEqual(
+            passed["actions"][2],
+            {"type": "setEvent", "event": "EVENT_PASSED_SS_ANNE_GUARD"},
+        )
         self.assertEqual(passed["source"]["adapter"], "vermilion_ss_anne_guard_v1")
 
         no_ticket = candidates["VermilionCitySSAnneGuardNoTicketBlocked"]
@@ -1880,6 +1930,14 @@ class SSAnne2FRivalCandidateTest(unittest.TestCase):
         self.assertEqual(battle["type"], "startTrainerBattle")
         self.assertEqual(battle["trainerClass"], "RIVAL2")
         self.assertEqual(battle["winFlag"], "EVENT_BEAT_SS_ANNE_RIVAL")
+        self.assertEqual(
+            battle["partyByFlag"],
+            {
+                "EVENT_PLAYER_CHOSE_SQUIRTLE": 2,
+                "EVENT_PLAYER_CHOSE_BULBASAUR": 3,
+                "EVENT_PLAYER_CHOSE_CHARMANDER": 1,
+            },
+        )
         self.assertEqual(battle["postWinActions"][1]["movements"], ["RIGHT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN"])
         self.assertEqual(battle["postWinActions"][2], {"type": "hideObject", "objectKey": "HS_SS_ANNE_2F_RIVAL"})
         self.assertEqual(candidate["source"]["adapter"], "ss_anne_2f_rival_v1")

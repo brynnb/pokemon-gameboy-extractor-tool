@@ -54,7 +54,8 @@ validation check succeeds:
 | `pokemon.db` | Relational Red/Blue data, release/run metadata, source-file and entity provenance, graphics/audio catalogs. |
 | `script_event_*.json` | Neutral script IR, candidates, diagnostics, trades, conditional dialogue, visibility, tile, and boulder data. |
 | `audio_manifest.json` | Versioned music, SFX, map-music, move-sound, and all 190 internal cry-slot metadata. |
-| `build/graphics/decoded/**` | Deterministic PNG decodes for every supported source `.1bpp` and `.2bpp` asset. |
+| `build/graphics/graphics-catalog.json` | Portable index of authored graphics and any decoded derivatives. |
+| `build/graphics/decoded/**` | Deterministic PNG decodes when the source revision contains authored `.1bpp`/`.2bpp` inputs. |
 | `export_scripts/tile_images/**` | Deduplicated 16×16 map tile PNGs. |
 | `pokemon-phaser/public/viewer-{data,assets}/**` | Static bundle consumed by the offline viewer. |
 
@@ -66,7 +67,9 @@ paths, which the renderer safely materializes below its selected output root.
 The pinned Red/Blue source baseline is validated for, among other invariants,
 151 species, all move IDs 1–165, all 72 evolution relationships, release-aware
 grass/water slot groups, 198 map-linked hidden objects, 561 normalized audio
-assets, and a complete source/derived graphics catalog. Exact checks live in
+assets, and all 711 source-controlled/non-ignored graphics files (including
+668 authored PNGs). Ignored compiler intermediates never alter the catalog.
+Exact checks live in
 `export_scripts/reprocess.py`, so incomplete releases are rejected rather than
 published.
 
@@ -128,7 +131,8 @@ can still be exercised independently with `npm run export`.
 The pipeline also runs SQLite integrity/foreign-key checks, exact source
 coverage checks, portable-path checks, graphics round-trip/hash validation,
 audio relationship validation, and release/provenance validation before
-publishing.
+publishing. A whole-release neutrality scan covers every SQLite text value and
+every staged JSON, viewer, and catalog text artifact.
 
 ## Project-neutral core and adapters
 
@@ -137,6 +141,24 @@ profile hooks live in `export_scripts/runtime_profiles.py`; the historical
 CaptureQuest mappings are isolated in the optional
 `export_scripts/adapters/capturequest.py` adapter. Consumers opt in explicitly,
 and the neutral artifacts remain the default.
+
+For a complete schema-v2 handoff, the independently versioned
+`capturequest-pokemon-import` v1 consumer negotiates the extractor schema,
+selects Red or Blue, and emits deterministic CaptureQuest build JSON from the
+normalized relationships:
+
+```bash
+pokemon-gameboy-adapt-capturequest pokemon.db --release red \
+  --output capturequest-red.json
+```
+
+It preserves `last-map` warps as dynamic runtime state, consumes normalized
+default moves and script relationships, and emits scoped portable asset paths.
+The same contract carries items, evolutions, learnsets/TM/HM compatibility,
+tiles and objects, trainers, dialogue pointers, hidden objects, map events, and
+the specialized neutral script-rule tables required by the current game
+integration. Adapter output can never overwrite its input SQLite database.
+This opt-in command is never called by the canonical extraction pipeline.
 
 ## Installable Python commands
 
@@ -147,6 +169,7 @@ python3 -m pip install .
 pokemon-gameboy-extract
 pokemon-gameboy-catalogue-graphics
 pokemon-gameboy-render-audio --build-gbs --kind all
+pokemon-gameboy-adapt-capturequest pokemon.db --release red
 ```
 
 Installed commands use the current directory as the checkout/workspace root.

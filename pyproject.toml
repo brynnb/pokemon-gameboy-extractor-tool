@@ -32,6 +32,7 @@ Issues = "https://github.com/brynnb/pokemon-gameboy-extractor-tool/issues"
 pokemon-gameboy-extract = "pokemon_gameboy_extractor.cli:extract"
 pokemon-gameboy-render-audio = "pokemon_gameboy_extractor.cli:render_audio"
 pokemon-gameboy-catalogue-graphics = "pokemon_gameboy_extractor.cli:catalogue_graphics"
+pokemon-gameboy-adapt-capturequest = "adapters.capturequest_v2:main"
 
 [tool.setuptools]
 package-dir = {"" = "export_scripts"}

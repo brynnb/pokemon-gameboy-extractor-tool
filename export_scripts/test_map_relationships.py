@@ -12,6 +12,7 @@ from export_script_candidates import (
     insert_candidate,
     insert_diagnostic,
     insert_ir_block,
+    source_map_id,
     validate_normalized_script_tables,
 )
 from export_text import create_tables as create_text_tables
@@ -63,6 +64,12 @@ class CanonicalMapResolverTest(unittest.TestCase):
         self.conn.execute("DELETE FROM maps WHERE name = 'CERULEAN_CITY'")
         with self.assertRaisesRegex(MapReferenceError, "missing maps.name"):
             CanonicalMapResolver.from_connection(self.conn, self.headers)
+
+    def test_source_candidate_map_ids_do_not_depend_on_a_generated_database(self):
+        self.assertEqual(source_map_id("PalletTown"), 0)
+        self.assertEqual(source_map_id("CeruleanCity_2"), 3)
+        with self.assertRaisesRegex(ValueError, "Unknown source map name"):
+            source_map_id("NotARealMap")
 
     def test_script_text_and_candidate_schemas_enforce_map_foreign_keys(self):
         create_map_script_tables(self.conn)

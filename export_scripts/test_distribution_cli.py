@@ -2,12 +2,13 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pokemon_gameboy_extractor.cli import configure_workspace
+from pokemon_gameboy_extractor.cli import configure_workspace, render_audio
 
 
 class DistributionCliTests(unittest.TestCase):
@@ -41,6 +42,17 @@ class DistributionCliTests(unittest.TestCase):
             ):
                 configure_workspace(Path(directory) / "workspace")
                 self.assertEqual(os.environ["POKEMON_EXTRACTOR_DB"], custom_database)
+
+    def test_audio_console_wrapper_propagates_renderer_failures(self):
+        renderer = SimpleNamespace(main=lambda: 7)
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with mock.patch.dict(sys.modules, {"render_audio_assets": renderer}):
+                    with mock.patch(
+                        "pokemon_gameboy_extractor.cli.configure_workspace"
+                    ) as configure:
+                        self.assertEqual(render_audio(), 7)
+        configure.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Catalog and losslessly render reusable Game Boy graphics assets.
 
-Every file below ``pokemon-game-data/gfx`` is represented as a source asset in
-the database. Raw ``.1bpp`` and ``.2bpp`` tile streams are additionally decoded
-to deterministic PNG tile sheets. Existing PNGs remain source assets; they are
-never copied into the generated output directory.
+Every version-controlled or non-ignored file below ``pokemon-game-data/gfx`` is
+represented as a source asset in the database. Ignored build intermediates are
+excluded, so catalog contents do not depend on whether the source checkout was
+previously compiled. Raw ``.1bpp`` and ``.2bpp`` source streams are additionally
+decoded to deterministic PNG tile sheets. Existing PNGs remain source assets;
+they are never copied into the generated output directory.
 
 The raw Game Boy formats do not contain canvas dimensions. When a same-stem PNG
 source exists, its dimensions and the closest matching row/column tile order
@@ -16,9 +18,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import json
 import math
 import os
 import sqlite3
+import subprocess
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -32,6 +36,7 @@ from tile_helpers import decode_2bpp_tile
 
 DECODER_VERSION = "gameboy-planar-v1"
 DEFAULT_FALLBACK_TILES_PER_ROW = 16
+CATALOG_MANIFEST_NAME = "graphics-catalog.json"
 
 # RGBDS uses palette index 0 for white and the highest index for black when
 # converting the monochrome source PNGs in this repository.
@@ -176,6 +181,45 @@ def _read_png_metadata(path: Path) -> tuple[int, int, str, tuple]:
         raise MalformedGraphicError(f"Cannot decode PNG source {path}: {exc}") from exc
 
 
+def _source_file_paths(source_root: Path) -> list[Path]:
+    """Return authored inputs without Git-ignored compilation byproducts."""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(source_root),
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                ".",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        result = None
+
+    if result is not None and result.returncode == 0:
+        paths = [source_root / relative for relative in result.stdout.splitlines()]
+        files = [path for path in paths if path.is_file()]
+        if files:
+            return sorted(
+                files,
+                key=lambda path: path.relative_to(source_root).as_posix(),
+            )
+
+    # Source archives need not retain .git metadata. In that case their
+    # contents are already the only available authority.
+    return sorted(
+        (candidate for candidate in source_root.rglob("*") if candidate.is_file()),
+        key=lambda path: path.relative_to(source_root).as_posix(),
+    )
+
+
 def collect_source_assets(
     source_root: Path = GFX_DIR,
     project_root: Path = PROJECT_ROOT,
@@ -187,10 +231,7 @@ def collect_source_assets(
         raise GraphicsExportError(f"Graphics source directory does not exist: {source_root}")
 
     assets: list[SourceAsset] = []
-    for path in sorted(
-        (candidate for candidate in source_root.rglob("*") if candidate.is_file()),
-        key=lambda candidate: candidate.relative_to(source_root).as_posix(),
-    ):
+    for path in _source_file_paths(source_root):
         source_relative = _portable_relative_path(path, source_root, "Graphics source")
         repository_relative = _portable_relative_path(path, project_root, "Graphics source")
         extension = _format_extension(path)
@@ -687,6 +728,71 @@ def _write_bytes_atomic(path: Path, data: bytes) -> None:
             temporary_path.unlink()
 
 
+def _graphics_manifest_bytes(conn: sqlite3.Connection) -> bytes:
+    """Serialize the portable graphics bundle index from normalized rows."""
+    sources = [
+        {
+            "path": path,
+            "format": extension,
+            "sha256": digest,
+            "byteSize": byte_size,
+        }
+        for path, extension, digest, byte_size in conn.execute(
+            """
+            SELECT asset.relative_path, format.extension, asset.sha256,
+                   asset.byte_size
+            FROM graphic_assets AS asset
+            JOIN graphic_formats AS format ON format.id = asset.format_id
+            WHERE asset.asset_role = 'source'
+            ORDER BY asset.relative_path
+            """
+        )
+    ]
+    derivations = [
+        {
+            "sourcePath": source_path,
+            "path": derived_path,
+            "sha256": digest,
+            "byteSize": byte_size,
+            "transformation": transformation,
+            "decoderVersion": decoder_version,
+            "layout": layout,
+            "tilesPerRow": tiles_per_row,
+            "tileCount": tile_count,
+        }
+        for (
+            source_path,
+            derived_path,
+            digest,
+            byte_size,
+            transformation,
+            decoder_version,
+            layout,
+            tiles_per_row,
+            tile_count,
+        ) in conn.execute(
+            """
+            SELECT source.relative_path, derived.relative_path,
+                   derived.sha256, derived.byte_size,
+                   relation.transformation, relation.decoder_version,
+                   relation.layout, relation.tiles_per_row, relation.tile_count
+            FROM graphic_derivations AS relation
+            JOIN graphic_assets AS source ON source.id = relation.source_asset_id
+            JOIN graphic_assets AS derived ON derived.id = relation.derived_asset_id
+            ORDER BY source.relative_path, derived.relative_path
+            """
+        )
+    ]
+    payload = {
+        "schemaVersion": 1,
+        "sourceAssetCount": len(sources),
+        "derivedAssetCount": len(derivations),
+        "sources": sources,
+        "derivations": derivations,
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _connect(db_or_connection: Path | str | sqlite3.Connection):
     if isinstance(db_or_connection, sqlite3.Connection):
         return db_or_connection, False
@@ -731,10 +837,10 @@ def validate_graphics_catalog(
                 f"Graphics catalog is missing tables: {', '.join(sorted(missing_tables))}"
             )
 
+        source_files = _source_file_paths(source_root)
         expected_sources = {
             _portable_relative_path(path, project_root, "Graphics source")
-            for path in source_root.rglob("*")
-            if path.is_file()
+            for path in source_files
         }
         actual_sources = {
             row[0]
@@ -821,8 +927,7 @@ def validate_graphics_catalog(
             path.relative_to(source_root).as_posix(): _portable_relative_path(
                 path, project_root, "Graphics source"
             )
-            for path in source_root.rglob("*")
-            if path.is_file()
+            for path in source_files
         }
         expected_source_links = set()
         for source_relative, repository_relative in source_path_by_relative.items():
@@ -917,6 +1022,14 @@ def validate_graphics_catalog(
                 raise GraphicsExportError(
                     f"Cannot validate derived graphic {output_path}: {exc}"
                 ) from exc
+
+        manifest_path = output_root / CATALOG_MANIFEST_NAME
+        if not manifest_path.is_file():
+            raise GraphicsExportError(f"Missing graphics catalog manifest: {manifest_path}")
+        if manifest_path.read_bytes() != _graphics_manifest_bytes(conn):
+            raise GraphicsExportError(
+                f"Graphics catalog manifest does not match the database: {manifest_path}"
+            )
 
         for source_path, derived_path, depth, layout, tile_count in conn.execute(
             """
@@ -1078,6 +1191,11 @@ def export_graphics(
 
             for asset in derived:
                 _write_bytes_atomic(output_root / asset.output_relative_path, asset.png_bytes)
+
+            _write_bytes_atomic(
+                output_root / CATALOG_MANIFEST_NAME,
+                _graphics_manifest_bytes(conn),
+            )
 
             result = validate_graphics_catalog(
                 conn,

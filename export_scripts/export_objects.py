@@ -61,7 +61,7 @@ def get_all_maps(cursor):
 def load_map_header_constants():
     """Map source header names like MtMoonB2F to constants like MT_MOON_B2F."""
     constants = {}
-    for header_path in MAP_HEADERS_DIR.glob("*.asm"):
+    for header_path in sorted(MAP_HEADERS_DIR.glob("*.asm")):
         with open(header_path, "r") as f:
             for raw_line in f:
                 line = raw_line.strip()
@@ -352,7 +352,7 @@ def main():
     header_constants = load_map_header_constants()
 
     # Get all map object files
-    map_files = list(POKEMON_DATA_DIR.glob("*.asm"))
+    map_files = sorted(POKEMON_DATA_DIR.glob("*.asm"))
     print(f"Found {len(map_files)} map files")
 
     # Process each map file

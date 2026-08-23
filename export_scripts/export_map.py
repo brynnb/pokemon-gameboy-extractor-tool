@@ -278,7 +278,7 @@ def extract_map_headers():
     map_to_constant = {}
     map_connections = []
 
-    header_files = glob.glob(f"{MAP_HEADERS_DIR}/*.asm")
+    header_files = sorted(glob.glob(f"{MAP_HEADERS_DIR}/*.asm"))
     for header_file in header_files:
         with open(header_file, "r") as f:
             content = f.read()
@@ -362,7 +362,7 @@ def extract_map_data():
     """Extract map data from .blk files"""
     map_data = {}
 
-    blk_files = glob.glob(f"{MAPS_DIR}/*.blk")
+    blk_files = sorted(glob.glob(f"{MAPS_DIR}/*.blk"))
     for blk_file in blk_files:
         map_name = os.path.basename(blk_file).replace(".blk", "")
 
@@ -390,7 +390,7 @@ def is_overworld_map(map_name, map_headers):
 
 def ensure_2bpp_files_exist():
     """Check for and generate 2bpp files from PNG files if they don't exist"""
-    png_files = glob.glob(f"{TILESETS_DIR}/*.png")
+    png_files = sorted(glob.glob(f"{TILESETS_DIR}/*.png"))
     generated_count = 0
     files_to_generate = []
 
@@ -436,7 +436,7 @@ def extract_tileset_data():
     tileset_data = {}
 
     # Get all blockset files
-    blockset_files = glob.glob(f"{BLOCKSETS_DIR}/*.bst")
+    blockset_files = sorted(glob.glob(f"{BLOCKSETS_DIR}/*.bst"))
     for blockset_file in blockset_files:
         tileset_name = os.path.basename(blockset_file).replace(".bst", "")
 

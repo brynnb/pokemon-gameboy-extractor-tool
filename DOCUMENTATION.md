@@ -123,7 +123,8 @@ Consequences for automation:
 | `script_event_object_visibility.json` | JSON file | Event-conditioned object visibility records. |
 | `script_event_conditional_dialogue.json` | JSON file | Prioritized conditional dialogue branches. |
 | `audio_manifest.json` | JSON file | Versioned audio catalog and logical output paths. |
-| `build/graphics/decoded/**` | Relative to graphics root | PNGs decoded from every supported `.1bpp`/`.2bpp` source. |
+| `build/graphics/graphics-catalog.json` | Relative to graphics root | Portable hashes and paths for source graphics and decoded derivatives. |
+| `build/graphics/decoded/**` | Relative to graphics root | PNGs decoded when authored `.1bpp`/`.2bpp` sources exist. |
 | `export_scripts/tile_images/**` | Relative to repository | Deduplicated 16×16 map-square PNGs. |
 | `pokemon-phaser/public/viewer-data/**` | Viewer-local | Static JSON split by map where appropriate. |
 | `pokemon-phaser/public/viewer-assets/**` | Viewer-local | Tile and sprite assets needed by the viewer. |
@@ -178,7 +179,8 @@ The project is installable with `python3 -m pip install .` and exposes:
 
 - `pokemon-gameboy-extract`;
 - `pokemon-gameboy-catalogue-graphics`; and
-- `pokemon-gameboy-render-audio`.
+- `pokemon-gameboy-render-audio`; and
+- `pokemon-gameboy-adapt-capturequest`.
 
 Installed commands treat the current directory as the checkout/workspace root.
 Set `POKEMON_EXTRACTOR_WORKSPACE` to point them at a different checkout. Normal
@@ -198,7 +200,10 @@ PRAGMA foreign_keys = ON;
   minimum reader version, and deterministic application epoch.
 - `game_releases` has distinct Red and Blue rows with build defines.
 - `extraction_runs` records the canonical run ID, revisions, epoch, portable
-  source root, source-tree hash, file count, and byte count.
+  source root, source-tree hash, file count, byte count, and a SHA-256 of the
+  exact generator worktree inputs plus an explicit dirty-state bit. Canonical
+  outputs and the upstream source submodule are excluded from that generator
+  hash because their content is recorded separately.
 - `extraction_run_releases` links the run to both releases.
 - `source_files` catalogs submodule source files using repository-relative
   paths, SHA-256, size, and a format-neutral file type.
@@ -344,10 +349,43 @@ With the repository checkout as the working directory, add `export_scripts` to
 `PYTHONPATH` before using those imports. New projects should define their own
 duck-typed profile or consume the neutral vocabulary directly.
 
+### CaptureQuest schema-v2 consumer
+
+`adapters/capturequest_v2.py` is a complete downstream import boundary rather
+than a canonical exporter. Its contract is separately versioned as
+`capturequest-pokemon-import` v1 and deliberately supports only extractor
+schema `pokemon-gameboy-extractor` v2 with reader version 2. It rejects unknown
+schemas before producing output.
+
+```bash
+pokemon-gameboy-adapt-capturequest pokemon.db --release red \
+  --output capturequest-red.json
+```
+
+The consumer selects `red` or `blue` encounter rows, retains numeric map IDs
+including ID 0, reconstructs scripts from normalized action, condition, and
+reference tables, applies the opt-in CaptureQuest runtime profile, reads
+ordered Pokémon defaults from `pokemon_default_moves`, and preserves
+`destination_kind = 'last-map'` with a null destination. It also converts
+repository, graphics-output, and logical audio paths to explicit scoped
+references. Items, all ordered evolution branches, level/TM/HM learnsets,
+tilesets/tiles/objects, trainers, dialogue pointers, hidden and missable
+objects, map events, and every specialized neutral script-rule table used by
+the downstream importer are included in the same versioned boundary. Output
+JSON is canonically ordered and written atomically, and the CLI rejects an
+output path that aliases its input database.
+
+CaptureQuest runtime mappings are drawn from diagnostic/source-state-machine
+coverage as well as generated candidates. The production integration check
+requires all 34 legacy mapping keys to remain represented. None of these names
+or mappings are written into the neutral SQLite or JSON artifacts.
+
 ## Graphics catalog and PNG output
 
-The graphics exporter walks every file under `pokemon-game-data/gfx`, then
-populates:
+The graphics exporter catalogs every version-controlled or non-ignored file
+under `pokemon-game-data/gfx`. Git-ignored compiler intermediates are excluded,
+so a previously built source checkout produces the same catalog as a fresh
+clone. It then populates:
 
 - `graphic_formats` and `graphic_categories`;
 - `graphic_palettes` and ordered `graphic_palette_colors`;
@@ -355,15 +393,17 @@ populates:
 - `graphic_source_links` for same-stem authored previews; and
 - `graphic_derivations` for raw-planar-to-PNG transformations.
 
-Every `.1bpp` and `.2bpp` stream is decoded. When an authored same-stem PNG
+Every authored `.1bpp` and `.2bpp` stream is decoded. When a same-stem PNG
 provides dimensions, it also helps preserve sheet layout; otherwise the
-exporter uses a deterministic eight-tile-wide fallback. The catalog records
+exporter uses a deterministic sixteen-tile-wide fallback. The catalog records
 dimensions, pixel mode, tile count, layout, palette, hashes, sizes, and the
 metadata basis. Validation re-encodes decoded images to prove byte-for-byte raw
 tile fidelity and compares applicable authored companions visually.
 
 Source PNGs and non-planar graphic formats remain directly addressable through
 repository-relative catalog rows. They are not needlessly transcoded or copied.
+`graphics-catalog.json` mirrors the portable source/derivation paths and hashes
+needed by consumers that do not query SQLite.
 
 ## Audio catalog and rendering
 

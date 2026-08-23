@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -56,6 +57,58 @@ class AtomicPublicationTests(unittest.TestCase):
             for output in (database, manifest):
                 self.assertEqual(output["final"].read_text(encoding="utf-8"), "new")
                 self.assertFalse(output["backup"].exists())
+
+
+class ProjectNeutralReleaseTests(unittest.TestCase):
+    def test_database_scan_checks_every_text_column(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        conn.executescript(
+            """
+            CREATE TABLE ordinary_data (id INTEGER PRIMARY KEY, payload TEXT, note BLOB);
+            INSERT INTO ordinary_data VALUES (1, '{"project":"generic"}', X'00');
+            """
+        )
+        reprocess.validate_neutral_database(conn)
+
+        conn.execute(
+            "UPDATE ordinary_data SET payload = ? WHERE id = 1",
+            ('{"runtime":"CaptureQuest"}',),
+        )
+        with self.assertRaisesRegex(
+            reprocess.PipelineError,
+            r"ordinary_data\.payload \(1\)",
+        ):
+            reprocess.validate_neutral_database(conn)
+
+    def test_generated_file_scan_covers_nested_catalogs_and_skips_binary_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            staged = root / ".viewer.token.stage"
+            (staged / "nested").mkdir(parents=True)
+            (staged / "nested" / "catalog.json").write_text(
+                '{"project":"generic"}', encoding="utf-8"
+            )
+            (staged / "sprite.png").write_bytes(b"capturequest")
+            outputs = [
+                {
+                    "environment_name": "POKEMON_EXTRACTOR_VIEWER_DATA_DIR",
+                    "final": root / "viewer",
+                    "staging": staged,
+                    "backup": root / ".viewer.token.backup",
+                    "is_directory": True,
+                }
+            ]
+            reprocess.validate_neutral_generated_files(outputs)
+
+            (staged / "nested" / "catalog.json").write_text(
+                '{"project":"capture-quest"}', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                reprocess.PipelineError,
+                "downstream-project vocabulary",
+            ):
+                reprocess.validate_neutral_generated_files(outputs)
 
     def test_failed_publication_restores_every_previous_artifact(self):
         with tempfile.TemporaryDirectory() as directory:

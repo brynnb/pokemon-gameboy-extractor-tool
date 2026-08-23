@@ -15,6 +15,7 @@ from config import (
     DB_PATH,
     EVENT_CONSTANTS_FILE,
     ITEM_CONSTANTS_FILE,
+    MAP_CONSTANTS_FILE,
     MAP_OBJECTS_DIR,
     POKEMON_CONSTANTS_FILE,
     PROJECT_ROOT,
@@ -32,7 +33,7 @@ from config import (
     TRADES_FILE,
 )
 from runtime_profiles import apply_candidate_profile, apply_diagnostic_profile
-from map_references import CanonicalMapResolver
+from map_references import CanonicalMapResolver, load_map_header_constants
 from text_tokens import normalize_game_text_tokens
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
@@ -386,15 +387,32 @@ def camel_to_upper_snake(value):
 def source_map_id(map_name):
     global _SOURCE_MAP_IDS
     if _SOURCE_MAP_IDS is None:
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            _SOURCE_MAP_IDS = {
-                name: map_id
-                for map_id, name in conn.execute("SELECT id, name FROM maps")
-            }
-        finally:
-            conn.close()
-    return _SOURCE_MAP_IDS.get(camel_to_upper_snake(map_name), 0)
+        constants = []
+        for raw_line in MAP_CONSTANTS_FILE.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"\s*map_const\s+([A-Z][A-Z0-9_]*)\s*,", raw_line)
+            if match:
+                constants.append(match.group(1))
+        if not constants:
+            raise ValueError(f"No map constants found in {MAP_CONSTANTS_FILE}")
+        ids_by_constant = {constant: map_id for map_id, constant in enumerate(constants)}
+        _SOURCE_MAP_IDS = dict(ids_by_constant)
+        for alias, constant in load_map_header_constants().items():
+            try:
+                _SOURCE_MAP_IDS[alias] = ids_by_constant[constant]
+            except KeyError as error:
+                raise ValueError(
+                    f"Map header alias {alias!r} references unknown constant {constant!r}"
+                ) from error
+
+    candidates = [map_name]
+    numbered = re.fullmatch(r"(.+)_\d+", map_name)
+    if numbered:
+        candidates.append(numbered.group(1))
+    candidates.extend(camel_to_upper_snake(candidate) for candidate in list(candidates))
+    for candidate in candidates:
+        if candidate in _SOURCE_MAP_IDS:
+            return _SOURCE_MAP_IDS[candidate]
+    raise ValueError(f"Unknown source map name: {map_name!r}")
 
 
 def parse_db_constants_array(script_content, label):
@@ -6794,12 +6812,16 @@ def vermilion_ss_anne_guard_candidates():
             "trigger": trigger,
             "conditions": {
                 **base_conditions,
-                "requiresEventAbsent": "EVENT_SS_ANNE_LEFT",
+                "requiresEventsAbsent": [
+                    "EVENT_SS_ANNE_LEFT",
+                    "EVENT_PASSED_SS_ANNE_GUARD",
+                ],
                 "requiresItem": "S_S_TICKET",
             },
             "actions": [
                 {"type": "lockInput"},
                 {"type": "dialogue", "lines": ticket_prompt_lines + flashed_ticket_lines},
+                {"type": "setEvent", "event": "EVENT_PASSED_SS_ANNE_GUARD"},
                 {"type": "unlockInput"},
             ],
             "source": source,
@@ -8917,9 +8939,9 @@ def ss_anne_2f_rival_candidate():
                     "trainerName": "RIVAL",
                     "winFlag": "EVENT_BEAT_SS_ANNE_RIVAL",
                     "partyByFlag": {
-                        "EVENT_PLAYER_CHOSE_SQUIRTLE": 1,
-                        "EVENT_PLAYER_CHOSE_BULBASAUR": 2,
-                        "EVENT_PLAYER_CHOSE_CHARMANDER": 3,
+                        "EVENT_PLAYER_CHOSE_SQUIRTLE": 2,
+                        "EVENT_PLAYER_CHOSE_BULBASAUR": 3,
+                        "EVENT_PLAYER_CHOSE_CHARMANDER": 1,
                     },
                     "postWinActions": [
                         {"type": "dialogue", "speaker": "RIVAL", "lines": defeated_lines + cut_master_lines},

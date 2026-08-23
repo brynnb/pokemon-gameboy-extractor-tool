@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import sqlite3
+import stat
 import subprocess
 from typing import Iterable
 
@@ -79,6 +81,34 @@ OWN_TABLES = frozenset(
     }
 )
 
+# Canonical outputs are deliberately excluded from the extractor worktree
+# fingerprint.  Otherwise a release would describe the previous generated
+# files that happened to be present before its atomic staging run, creating a
+# self-referential and non-reproducible identity.
+GENERATED_EXTRACTOR_PATHS = frozenset(
+    {
+        "audio_manifest.json",
+        "pokemon.db",
+        "script_event_boulder_targets.json",
+        "script_event_candidates.json",
+        "script_event_conditional_dialogue.json",
+        "script_event_diagnostics.json",
+        "script_event_in_game_trades.json",
+        "script_event_ir.json",
+        "script_event_object_visibility.json",
+        "script_event_tile_overrides.json",
+    }
+)
+GENERATED_EXTRACTOR_PREFIXES = (
+    "build/",
+    "export_scripts/tile_images/",
+    "pokemon-phaser/public/viewer-assets/",
+    "pokemon-phaser/public/viewer-data/",
+)
+PIPELINE_TEMP_COMPONENT = re.compile(
+    r"^\..+\.[0-9a-f]{32}\.(?:stage|backup)$"
+)
+
 
 def _quote_identifier(identifier: str) -> str:
     """Quote an identifier obtained from SQLite's own schema catalog."""
@@ -106,6 +136,149 @@ def git_revision(repo: Path) -> str:
     if not revision:
         raise ValueError(f"Git returned an empty revision for {repo}")
     return revision
+
+
+def _excluded_extractor_path(relative: str, source_relative: str) -> bool:
+    return (
+        relative == source_relative
+        or relative.startswith(source_relative + "/")
+        or relative in GENERATED_EXTRACTOR_PATHS
+        or any(relative.startswith(prefix) for prefix in GENERATED_EXTRACTOR_PREFIXES)
+        # Atomic publication creates these beside each final output.  They are
+        # transient generated state, and the staged database would otherwise
+        # fingerprint itself while release metadata is being written.
+        or any(PIPELINE_TEMP_COMPONENT.fullmatch(part) for part in PurePosixPath(relative).parts)
+    )
+
+
+def _extractor_catalog_paths(project_root: Path, source_relative: str) -> list[str]:
+    """Return deterministic generator-input paths, including non-ignored additions."""
+    try:
+        top_level = Path(_run_git(project_root, "rev-parse", "--show-toplevel")).resolve()
+        if top_level != project_root:
+            raise ValueError("project root is not the Git root")
+        output = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+        paths = [
+            value.decode("utf-8", "surrogateescape")
+            for value in output.split(b"\0")
+            if value
+        ]
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        paths = [
+            path.relative_to(project_root).as_posix()
+            for path in project_root.rglob("*")
+            if not any(part == ".git" for part in path.relative_to(project_root).parts)
+        ]
+    return sorted(
+        set(
+            relative
+            for relative in paths
+            if not _excluded_extractor_path(relative, source_relative)
+        )
+    )
+
+
+def _extractor_worktree_dirty(project_root: Path, source_relative: str) -> bool:
+    """Return whether a Git worktree has relevant tracked or untracked changes."""
+    try:
+        output = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+    records = output.split(b"\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        if len(record) < 4:
+            return True
+        status_code = record[:2]
+        relative = record[3:].decode("utf-8", "surrogateescape")
+        old_relative = None
+        if b"R" in status_code or b"C" in status_code:
+            if index < len(records):
+                old_relative = records[index].decode("utf-8", "surrogateescape")
+                index += 1
+        if not _excluded_extractor_path(relative, source_relative):
+            return True
+        if old_relative and not _excluded_extractor_path(old_relative, source_relative):
+            return True
+    return False
+
+
+def extractor_worktree_state(project_root: Path, source_root: Path) -> tuple[str, bool]:
+    """Hash exact generator inputs and report whether their Git state is dirty."""
+    source_relative = source_root.relative_to(project_root).as_posix()
+    digest = hashlib.sha256()
+    for relative in _extractor_catalog_paths(project_root, source_relative):
+        path = project_root / relative
+        if path.is_symlink():
+            payload = os.fsencode(os.readlink(path))
+            kind = "symlink"
+            mode = "symlink"
+        elif path.is_file():
+            payload = path.read_bytes()
+            kind = "file"
+            mode = "executable" if path.stat().st_mode & stat.S_IXUSR else "regular"
+        elif path.exists():
+            # A Gitlink is a directory in the checkout.  Its exact revision is
+            # already recorded separately for the source tree; other Gitlinks
+            # are represented by their checked-out revision when available.
+            try:
+                payload = git_revision(path).encode("ascii")
+            except ValueError:
+                payload = b""
+            kind = "gitlink"
+            mode = "directory"
+        else:
+            # A tracked deletion must change the fingerprint rather than
+            # silently disappearing from the catalog.
+            payload = b""
+            kind = "missing"
+            mode = "missing"
+        record = {
+            "kind": kind,
+            "mode": mode,
+            "path": relative,
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+        }
+        digest.update(
+            json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        )
+        digest.update(b"\n")
+    return digest.hexdigest(), _extractor_worktree_dirty(
+        project_root, source_relative
+    )
 
 
 def resolve_source_date_epoch(source_root: Path, explicit_epoch=None) -> int:
@@ -301,6 +474,8 @@ def source_tree_sha256(source_files: Iterable[dict]) -> str:
 def extraction_run_id(
     *,
     extractor_revision: str,
+    extractor_tree_hash: str,
+    extractor_worktree_dirty: bool,
     source_revision: str,
     source_date_epoch: int,
     source_root: str,
@@ -308,6 +483,8 @@ def extraction_run_id(
 ) -> str:
     payload = {
         "extractor_revision": extractor_revision,
+        "extractor_tree_sha256": extractor_tree_hash,
+        "extractor_worktree_dirty": bool(extractor_worktree_dirty),
         "releases": [row[1] for row in RELEASES],
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
@@ -371,6 +548,12 @@ def create_tables(conn: sqlite3.Connection) -> None:
             schema_name TEXT NOT NULL,
             schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
             extractor_revision TEXT NOT NULL CHECK (length(trim(extractor_revision)) > 0),
+            extractor_tree_sha256 TEXT NOT NULL
+                CHECK (length(extractor_tree_sha256) = 64
+                       AND extractor_tree_sha256 = lower(extractor_tree_sha256)
+                       AND extractor_tree_sha256 NOT GLOB '*[^0-9a-f]*'),
+            extractor_worktree_dirty INTEGER NOT NULL
+                CHECK (extractor_worktree_dirty IN (0, 1)),
             source_revision TEXT NOT NULL CHECK (length(trim(source_revision)) > 0),
             source_date_epoch INTEGER NOT NULL CHECK (source_date_epoch >= 0),
             source_root TEXT NOT NULL
@@ -384,7 +567,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
                        AND source_tree_sha256 NOT GLOB '*[^0-9a-f]*'),
             source_file_count INTEGER NOT NULL CHECK (source_file_count > 0),
             source_total_bytes INTEGER NOT NULL CHECK (source_total_bytes >= 0),
-            UNIQUE (extractor_revision, source_revision, source_date_epoch, source_tree_sha256),
+            UNIQUE (
+                extractor_revision, extractor_tree_sha256,
+                source_revision, source_date_epoch, source_tree_sha256
+            ),
             FOREIGN KEY (schema_name, schema_version)
                 REFERENCES schema_metadata (schema_name, schema_version)
         );
@@ -691,12 +877,17 @@ def export_release_metadata(
     source_root = Path(source_root).resolve(strict=True)
     source_root_relative = _portable_relative_path(source_root, project_root)
     extractor_revision = extractor_revision or git_revision(project_root)
+    extractor_tree_hash, worktree_dirty = extractor_worktree_state(
+        project_root, source_root
+    )
     source_revision = source_revision or git_revision(source_root)
     epoch = resolve_source_date_epoch(source_root, source_date_epoch)
     files = collect_source_files(project_root, source_root)
     tree_hash = source_tree_sha256(files)
     run_id = extraction_run_id(
         extractor_revision=extractor_revision,
+        extractor_tree_hash=extractor_tree_hash,
+        extractor_worktree_dirty=worktree_dirty,
         source_revision=source_revision,
         source_date_epoch=epoch,
         source_root=source_root_relative,
@@ -720,16 +911,19 @@ def export_release_metadata(
     conn.execute(
         """
         INSERT INTO extraction_runs (
-            run_id, schema_name, schema_version, extractor_revision, source_revision,
+            run_id, schema_name, schema_version, extractor_revision,
+            extractor_tree_sha256, extractor_worktree_dirty, source_revision,
             source_date_epoch, source_root, source_tree_sha256,
             source_file_count, source_total_bytes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
             SCHEMA_NAME,
             SCHEMA_VERSION,
             extractor_revision,
+            extractor_tree_hash,
+            int(worktree_dirty),
             source_revision,
             epoch,
             source_root_relative,
@@ -815,7 +1009,8 @@ def validate_release_metadata(conn: sqlite3.Connection) -> None:
 
     runs = conn.execute(
         """
-        SELECT run_id, extractor_revision, source_revision, source_date_epoch,
+        SELECT run_id, extractor_revision, extractor_tree_sha256,
+               extractor_worktree_dirty, source_revision, source_date_epoch,
                source_root, source_tree_sha256, source_file_count, source_total_bytes
         FROM extraction_runs
         """
@@ -825,6 +1020,8 @@ def validate_release_metadata(conn: sqlite3.Connection) -> None:
     (
         run_id,
         extractor_revision,
+        extractor_tree_hash,
+        extractor_worktree_dirty,
         source_revision,
         epoch,
         source_root,
@@ -832,6 +1029,12 @@ def validate_release_metadata(conn: sqlite3.Connection) -> None:
         recorded_file_count,
         recorded_total_bytes,
     ) = runs[0]
+    if (
+        len(extractor_tree_hash) != 64
+        or any(character not in "0123456789abcdef" for character in extractor_tree_hash)
+        or extractor_worktree_dirty not in (0, 1)
+    ):
+        raise ValueError("Extraction run has invalid generator worktree metadata")
     if not is_portable_relative_path(source_root):
         raise ValueError(f"Non-portable source root: {source_root}")
     if schema_rows[0][3] != epoch:
@@ -872,6 +1075,8 @@ def validate_release_metadata(conn: sqlite3.Connection) -> None:
         raise ValueError("Source tree hash does not match its file catalog")
     calculated_run_id = extraction_run_id(
         extractor_revision=extractor_revision,
+        extractor_tree_hash=extractor_tree_hash,
+        extractor_worktree_dirty=bool(extractor_worktree_dirty),
         source_revision=source_revision,
         source_date_epoch=epoch,
         source_root=source_root,

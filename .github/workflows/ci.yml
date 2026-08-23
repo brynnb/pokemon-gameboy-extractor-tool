@@ -53,9 +53,60 @@ jobs:
         if: matrix.python-version == '3.14'
         env:
           SOURCE_DATE_EPOCH: "1700000000"
-        run: python export_scripts/reprocess.py
+        run: |
+          python export_scripts/reprocess.py
+          release_outputs=(
+            pokemon.db audio_manifest.json script_event_candidates.json
+            script_event_ir.json script_event_diagnostics.json
+            script_event_in_game_trades.json script_event_tile_overrides.json
+            script_event_boulder_targets.json script_event_object_visibility.json
+            script_event_conditional_dialogue.json build/graphics
+            export_scripts/tile_images pokemon-phaser/public/viewer-data
+            pokemon-phaser/public/viewer-assets
+          )
+          find "${release_outputs[@]}" -type f -print0 \
+            | sort -z | xargs -0 sha256sum > "${RUNNER_TEMP}/release-first.sha256"
+          python export_scripts/reprocess.py
+          find "${release_outputs[@]}" -type f -print0 \
+            | sort -z | xargs -0 sha256sum > "${RUNNER_TEMP}/release-second.sha256"
+          cmp "${RUNNER_TEMP}/release-first.sha256" "${RUNNER_TEMP}/release-second.sha256"
+          git diff --exit-code -- \
+            audio_manifest.json script_event_boulder_targets.json \
+            script_event_object_visibility.json script_event_tile_overrides.json
+      - name: Validate CaptureQuest schema-v2 adapter against fresh output
+        if: matrix.python-version == '3.14'
+        env:
+          POKEMON_EXTRACTOR_INTEGRATION_DB: ${{ github.workspace }}/pokemon.db
+          PYTHONPATH: export_scripts
+          PYTHONWARNINGS: error::ResourceWarning
+        run: |
+          python -m unittest adapters.test_capturequest_v2
+          python -m adapters.capturequest_v2 pokemon.db --release red \
+            --output "${RUNNER_TEMP}/capturequest-red.json"
+          python -m adapters.capturequest_v2 pokemon.db --release blue \
+            --output "${RUNNER_TEMP}/capturequest-blue.json"
+          test -s "${RUNNER_TEMP}/capturequest-red.json"
+          test -s "${RUNNER_TEMP}/capturequest-blue.json"
       - name: Build installable distribution
         run: python -m pip wheel --no-deps --wheel-dir "${RUNNER_TEMP}/wheelhouse" .
+      - name: Install and smoke-test distribution entry points
+        run: |
+          python -m venv "${RUNNER_TEMP}/installed"
+          "${RUNNER_TEMP}/installed/bin/python" -m pip install \
+            --disable-pip-version-check "${RUNNER_TEMP}"/wheelhouse/*.whl
+          for command in \
+            pokemon-gameboy-extract \
+            pokemon-gameboy-render-audio \
+            pokemon-gameboy-catalogue-graphics \
+            pokemon-gameboy-adapt-capturequest
+          do
+            "${RUNNER_TEMP}/installed/bin/${command}" --help >/dev/null
+          done
+          if "${RUNNER_TEMP}/installed/bin/pokemon-gameboy-render-audio" \
+              --gbs "${RUNNER_TEMP}/missing.gbs" >/dev/null 2>&1; then
+            echo "audio renderer masked a failure" >&2
+            exit 1
+          fi
 
   viewer:
     name: Viewer build and dependency audit

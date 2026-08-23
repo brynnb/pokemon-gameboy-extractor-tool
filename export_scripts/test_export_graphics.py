@@ -1,5 +1,7 @@
 import hashlib
+import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -175,6 +177,11 @@ class GraphicsExportTest(unittest.TestCase):
 
         # Authored source PNGs are linked in the catalog, not copied.
         self.assertFalse((self.output_root / "decoded" / "glyph.png").exists())
+        manifest = json.loads(
+            (self.output_root / "graphics-catalog.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["sourceAssetCount"], 6)
+        self.assertEqual(manifest["derivedAssetCount"], 3)
 
     def test_output_is_deterministic_and_revalidates(self):
         self.export()
@@ -218,6 +225,45 @@ class GraphicsExportTest(unittest.TestCase):
                 output_root=self.source_root / "generated",
                 project_root=self.project_root,
             )
+
+    def test_git_ignored_build_intermediates_do_not_change_the_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_root = Path(directory) / "repository"
+            source_root = project_root / "gfx"
+            output_root = Path(directory) / "graphics"
+            db_path = Path(directory) / "catalog.sqlite3"
+            source_root.mkdir(parents=True)
+            (project_root / ".gitignore").write_text("*.2bpp\n", encoding="utf-8")
+            Image.new("L", (8, 8), color=255).save(source_root / "authored.png")
+            (source_root / "generated.2bpp").write_bytes(
+                encode_uniform_2bpp_tile(0)
+            )
+            subprocess.run(
+                ["git", "init", "-q", str(project_root)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(project_root), "add", ".gitignore", "gfx/authored.png"],
+                check=True,
+            )
+
+            result = export_graphics(
+                db_path,
+                source_root=source_root,
+                output_root=output_root,
+                project_root=project_root,
+            )
+
+            self.assertEqual(
+                result,
+                {"source_assets": 1, "derived_assets": 0, "source_links": 0},
+            )
+            with closing(sqlite3.connect(db_path)) as conn:
+                paths = conn.execute(
+                    "SELECT relative_path FROM graphic_assets ORDER BY relative_path"
+                ).fetchall()
+            self.assertEqual(paths, [("gfx/authored.png",)])
+            self.assertTrue((output_root / "graphics-catalog.json").is_file())
 
 
 if __name__ == "__main__":

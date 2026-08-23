@@ -92,6 +92,17 @@ class PipelineError(RuntimeError):
     """A generation or release validation step failed."""
 
 
+FORBIDDEN_PROJECT_VOCABULARY = (
+    "capturequest",
+    "capture quest",
+    "capture-quest",
+)
+
+TEXT_OUTPUT_SUFFIXES = frozenset(
+    {".css", ".csv", ".html", ".js", ".json", ".mjs", ".svg", ".ts", ".txt"}
+)
+
+
 def path_exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
@@ -188,7 +199,7 @@ def require_table(conn: sqlite3.Connection, table: str, *, expected_count=None) 
     if not exists:
         raise PipelineError(f"Missing generated table: {table}")
     count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-    if count == 0:
+    if count == 0 and expected_count != 0:
         raise PipelineError(f"Generated table is empty: {table}")
     if expected_count is not None and count != expected_count:
         raise PipelineError(
@@ -229,9 +240,9 @@ def validate_generated_database(
             "warp_events": 805,
             "audio_assets": 561,
             "move_audio_assets": 165,
-            "graphic_assets": 2086,
-            "graphic_derivations": 509,
-            "graphic_source_links": 870,
+            "graphic_assets": 711,
+            "graphic_derivations": 0,
+            "graphic_source_links": 6,
             "schema_metadata": 1,
             "game_releases": 2,
             "extraction_runs": 1,
@@ -353,8 +364,68 @@ def validate_generated_database(
             raise PipelineError(
                 f"Generated database contains {absolute_paths} host-specific absolute paths"
             )
+
+        validate_neutral_database(conn)
     finally:
         conn.close()
+
+
+def _quoted_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def validate_neutral_database(conn: sqlite3.Connection) -> None:
+    """Reject downstream-project branding in any staged SQLite text value."""
+    offenders = []
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    for (table,) in tables:
+        quoted_table = _quoted_identifier(table)
+        for column in conn.execute(f"PRAGMA table_info({quoted_table})"):
+            column_name = column[1]
+            quoted_column = _quoted_identifier(column_name)
+            predicates = " OR ".join(
+                "instr(lower(CAST({column} AS TEXT)), ?) > 0".format(
+                    column=quoted_column
+                )
+                for _ in FORBIDDEN_PROJECT_VOCABULARY
+            )
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM {quoted_table} "
+                f"WHERE typeof({quoted_column}) = 'text' AND ({predicates})",
+                FORBIDDEN_PROJECT_VOCABULARY,
+            ).fetchone()[0]
+            if count:
+                offenders.append(f"{table}.{column_name} ({count})")
+    if offenders:
+        raise PipelineError(
+            "Canonical database contains downstream-project vocabulary: "
+            + ", ".join(offenders[:20])
+        )
+
+
+def validate_neutral_generated_files(outputs) -> None:
+    """Reject downstream-project branding in staged, canonical text artifacts."""
+    offenders = []
+    forbidden_bytes = tuple(value.encode("utf-8") for value in FORBIDDEN_PROJECT_VOCABULARY)
+    for output in outputs:
+        if output["environment_name"] == "POKEMON_EXTRACTOR_DB":
+            continue
+        root = Path(output["staging"])
+        paths = sorted(root.rglob("*")) if output["is_directory"] else [root]
+        for path in paths:
+            if not path.is_file() or path.suffix.lower() not in TEXT_OUTPUT_SUFFIXES:
+                continue
+            payload = path.read_bytes().lower()
+            if any(value in payload for value in forbidden_bytes):
+                offenders.append(str(path))
+    if offenders:
+        raise PipelineError(
+            "Canonical generated files contain downstream-project vocabulary: "
+            + ", ".join(offenders[:20])
+        )
 
 
 def validate_staged_outputs(outputs) -> None:
@@ -471,6 +542,7 @@ def main(argv=None) -> None:
                 staged_audio, staged_manifest, require_complete=True
             )
         validate_staged_outputs(outputs)
+        validate_neutral_generated_files(outputs)
         publish_outputs(outputs)
     finally:
         cleanup_outputs(outputs)

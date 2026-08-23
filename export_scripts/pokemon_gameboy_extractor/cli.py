@@ -51,12 +51,12 @@ def extract() -> None:
     main()
 
 
-def render_audio() -> None:
+def render_audio() -> int:
     """Run the audio renderer, forwarding its normal command-line options."""
     configure_workspace()
     from render_audio_assets import main
 
-    main()
+    return main()
 
 
 def catalogue_graphics() -> None:
