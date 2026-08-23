@@ -30,6 +30,11 @@ class MapReferenceError(ValueError):
     """A source map name cannot be mapped to one canonical database row."""
 
 
+def normalized_map_identifier(value: str) -> str:
+    """Fold assembly/CamelCase map identifiers without trusting header dimensions."""
+    return "".join(character.casefold() for character in value if character.isalnum())
+
+
 def load_map_header_constants(map_headers_dir: Path = MAP_HEADERS_DIR) -> dict[str, str]:
     """Return authoritative source-label/file-stem -> map-constant aliases."""
     aliases: dict[str, str] = {}
@@ -75,13 +80,30 @@ class CanonicalMapResolver:
 
         ids_by_constant = {name: map_id for map_id, name in map_rows}
         ids_by_alias = dict(ids_by_constant)
+
+        # The second map_header argument supplies dimensions, not always the map's
+        # identity. A retained copy can deliberately reuse another map's dimensions
+        # (UndergroundPathRoute7Copy uses UNDERGROUND_PATH_ROUTE_7) while still
+        # owning its distinct map constant and ID.
+        ids_by_normalized_constant: dict[str, int] = {}
+        for map_id, name in map_rows:
+            normalized = normalized_map_identifier(name)
+            previous = ids_by_normalized_constant.get(normalized)
+            if previous is not None and previous != map_id:
+                raise MapReferenceError(
+                    f"Ambiguous normalized map constant: {name!r}"
+                )
+            ids_by_normalized_constant[normalized] = map_id
+
         for alias, map_constant in load_map_header_constants(map_headers_dir).items():
             if map_constant not in ids_by_constant:
                 raise MapReferenceError(
                     f"Map header alias {alias!r} refers to missing maps.name "
                     f"{map_constant!r}"
                 )
-            ids_by_alias[alias] = ids_by_constant[map_constant]
+            ids_by_alias[alias] = ids_by_normalized_constant.get(
+                normalized_map_identifier(alias), ids_by_constant[map_constant]
+            )
 
         ids_by_casefolded_alias: dict[str, int] = {}
         for alias, map_id in ids_by_alias.items():

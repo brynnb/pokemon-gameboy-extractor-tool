@@ -31,6 +31,14 @@ class CanonicalMapResolverTest(unittest.TestCase):
             "map_header CeruleanCity, CERULEAN_CITY, OVERWORLD, NONE\n",
             encoding="utf-8",
         )
+        (self.headers / "UndergroundPathRoute7.asm").write_text(
+            "map_header UndergroundPathRoute7, UNDERGROUND_PATH_ROUTE_7, GATE, 0\n",
+            encoding="utf-8",
+        )
+        (self.headers / "UndergroundPathRoute7Copy.asm").write_text(
+            "map_header UndergroundPathRoute7Copy, UNDERGROUND_PATH_ROUTE_7, GATE, 0\n",
+            encoding="utf-8",
+        )
         self.conn = sqlite3.connect(":memory:")
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute(
@@ -38,7 +46,12 @@ class CanonicalMapResolverTest(unittest.TestCase):
         )
         self.conn.executemany(
             "INSERT INTO maps VALUES (?, ?)",
-            ((0, "PALLET_TOWN"), (3, "CERULEAN_CITY")),
+            (
+                (0, "PALLET_TOWN"),
+                (3, "CERULEAN_CITY"),
+                (77, "UNDERGROUND_PATH_ROUTE_7"),
+                (78, "UNDERGROUND_PATH_ROUTE_7_COPY"),
+            ),
         )
 
     def tearDown(self):
@@ -55,6 +68,11 @@ class CanonicalMapResolverTest(unittest.TestCase):
         self.assertEqual(resolver.resolve("pallettown"), 0)
         self.assertEqual(resolver.resolve("CeruleanCity_2"), 3)
         self.assertIsNone(resolver.resolve("GLOBAL", allow_global=True))
+
+    def test_copy_label_identity_overrides_reused_header_dimensions(self):
+        resolver = self.resolver()
+        self.assertEqual(resolver.resolve("UndergroundPathRoute7"), 77)
+        self.assertEqual(resolver.resolve("UndergroundPathRoute7Copy"), 78)
 
     def test_unknown_names_and_missing_canonical_rows_are_rejected(self):
         resolver = self.resolver()
