@@ -31,6 +31,8 @@ from config import (
     TEXT_DIR,
     TRADES_FILE,
 )
+from runtime_profiles import apply_candidate_profile, apply_diagnostic_profile
+from map_references import CanonicalMapResolver
 from text_tokens import normalize_game_text_tokens
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
@@ -46,6 +48,10 @@ CONDITIONAL_DIALOGUE_OUTPUT_PATH = SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH
 
 def create_tables(conn):
     cursor = conn.cursor()
+    cursor.execute("DROP TABLE IF EXISTS script_event_candidate_references")
+    cursor.execute("DROP TABLE IF EXISTS script_event_ir_references")
+    cursor.execute("DROP TABLE IF EXISTS script_event_candidate_conditions")
+    cursor.execute("DROP TABLE IF EXISTS script_event_candidate_actions")
     cursor.execute("DROP TABLE IF EXISTS script_event_candidates")
     cursor.execute("DROP TABLE IF EXISTS script_event_ir_blocks")
     cursor.execute("DROP TABLE IF EXISTS script_event_candidate_diagnostics")
@@ -59,11 +65,13 @@ def create_tables(conn):
         CREATE TABLE script_event_candidates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             map_name TEXT NOT NULL,
+            map_id INTEGER NOT NULL,
             script_label TEXT NOT NULL,
             trigger_type TEXT NOT NULL,
             trigger_label TEXT NOT NULL,
             confidence TEXT NOT NULL,
-            candidate_json TEXT NOT NULL
+            candidate_json TEXT NOT NULL,
+            FOREIGN KEY (map_id) REFERENCES maps (id)
         )
         """
     )
@@ -72,6 +80,7 @@ def create_tables(conn):
         CREATE TABLE script_event_ir_blocks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             map_name TEXT NOT NULL,
+            map_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             kind TEXT NOT NULL,
             features_json TEXT NOT NULL,
@@ -83,7 +92,67 @@ def create_tables(conn):
             object_refs_json TEXT NOT NULL,
             battle_refs_json TEXT NOT NULL,
             warp_refs_json TEXT NOT NULL,
-            raw_asm TEXT NOT NULL
+            raw_asm TEXT NOT NULL,
+            FOREIGN KEY (map_id) REFERENCES maps (id)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE script_event_candidate_actions (
+            candidate_id INTEGER NOT NULL,
+            action_index INTEGER NOT NULL CHECK(action_index >= 0),
+            action_type TEXT NOT NULL CHECK(action_type <> ''),
+            action_json TEXT NOT NULL CHECK(json_valid(action_json)),
+            PRIMARY KEY(candidate_id, action_index),
+            FOREIGN KEY(candidate_id) REFERENCES script_event_candidates(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE script_event_candidate_conditions (
+            candidate_id INTEGER NOT NULL,
+            condition_path TEXT NOT NULL CHECK(condition_path <> ''),
+            value_index INTEGER NOT NULL CHECK(value_index >= 0),
+            condition_value_json TEXT NOT NULL CHECK(json_valid(condition_value_json)),
+            PRIMARY KEY(candidate_id, condition_path, value_index),
+            FOREIGN KEY(candidate_id) REFERENCES script_event_candidates(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE script_event_candidate_references (
+            candidate_id INTEGER NOT NULL,
+            reference_kind TEXT NOT NULL CHECK(reference_kind IN (
+                'event', 'item', 'pokemon', 'movement', 'object', 'map',
+                'script', 'text', 'battle', 'warp'
+            )),
+            json_path TEXT NOT NULL CHECK(json_path <> ''),
+            reference_index INTEGER NOT NULL CHECK(reference_index >= 0),
+            reference_value_json TEXT NOT NULL CHECK(json_valid(reference_value_json)),
+            PRIMARY KEY(candidate_id, reference_kind, json_path, reference_index),
+            FOREIGN KEY(candidate_id) REFERENCES script_event_candidates(id)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE script_event_ir_references (
+            ir_block_id INTEGER NOT NULL,
+            reference_kind TEXT NOT NULL CHECK(reference_kind IN (
+                'text', 'event', 'item', 'pokemon', 'movement', 'object',
+                'battle', 'warp'
+            )),
+            reference_index INTEGER NOT NULL CHECK(reference_index >= 0),
+            reference_value_json TEXT NOT NULL CHECK(json_valid(reference_value_json)),
+            PRIMARY KEY(ir_block_id, reference_kind, reference_index),
+            FOREIGN KEY(ir_block_id) REFERENCES script_event_ir_blocks(id)
+                ON DELETE CASCADE
         )
         """
     )
@@ -92,10 +161,16 @@ def create_tables(conn):
         CREATE TABLE script_event_candidate_diagnostics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             map_name TEXT NOT NULL,
+            map_id INTEGER,
             script_label TEXT NOT NULL,
             status TEXT NOT NULL,
             reason TEXT NOT NULL,
-            details_json TEXT NOT NULL
+            details_json TEXT NOT NULL,
+            FOREIGN KEY (map_id) REFERENCES maps (id),
+            CHECK (
+                (map_name = 'GLOBAL' AND map_id IS NULL)
+                OR (map_name <> 'GLOBAL' AND map_id IS NOT NULL)
+            )
         )
         """
     )
@@ -104,9 +179,11 @@ def create_tables(conn):
         CREATE TABLE IF NOT EXISTS coordinate_triggers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             map_name TEXT NOT NULL,
+            map_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             x INTEGER NOT NULL,
-            y INTEGER NOT NULL
+            y INTEGER NOT NULL,
+            FOREIGN KEY (map_id) REFERENCES maps (id)
         )
         """
     )
@@ -3817,7 +3894,7 @@ def fuchsia_fossil_sign_candidates():
         [
             "sourceBlock=FuchsiaCityFossilSignText",
             "Generated for the two-fossil flag branch on the Fuchsia zoo fossil sign.",
-            "DisplayPokedex side effects are recorded in diagnostics but not modeled as CaptureQuest cutscene actions yet.",
+            "DisplayPokedex side effects are recorded in diagnostics but are not modeled as generic script actions yet.",
         ],
     )
     source["coveredLabels"] = ["FuchsiaCityFossilSignText"]
@@ -6824,7 +6901,7 @@ def viridian_city_progress_blocker_candidates():
         text_path,
         [
             "Generated from ViridianCityCheckGymOpenScript and ViridianCityCheckGotPokedexScript.",
-            "The Red/Blue Earth Badge bit is represented by CaptureQuest's EVENT_GOT_EARTHBADGE flag.",
+            "The Red/Blue Earth Badge bit is represented by the neutral EVENT_GOT_EARTHBADGE flag.",
             "The source state-script handoff that moves the player down is represented by a direct movePlayer DOWN action.",
         ],
     )
@@ -8048,7 +8125,7 @@ def indigo_plateau_lobby_map_load_reset_candidate():
         [
             "Generated from IndigoPlateauLobby_Script map-load cleanup.",
             "The source resets EVENT_VICTORY_ROAD_1_BOULDER_ON_SWITCH when the map-load bit is set.",
-            "The source conditionally clears Elite Four progress from INDIGO_PLATEAU_EVENTS_START through EVENT_LANCES_ROOM_LOCK_DOOR after BIT_STARTED_ELITE_4; CaptureQuest represents this as idempotent map-load reset actions.",
+            "The source conditionally clears Elite Four progress from INDIGO_PLATEAU_EVENTS_START through EVENT_LANCES_ROOM_LOCK_DOOR after BIT_STARTED_ELITE_4; the candidate represents this as idempotent map-load reset actions.",
         ],
     )
     source["coveredLabels"] = ["IndigoPlateauLobby_Script"]
@@ -8132,7 +8209,7 @@ def cerulean_city_rival_candidates():
         [
             "sourceBlock=CeruleanCityDefaultScript",
             "Generated from the Cerulean bridge rival coordinate trigger, battle branch, and cleanup scripts.",
-            "The Red/Blue left/right bridge cleanup movement is collapsed to the current CaptureQuest post-win movement path.",
+            "The source left/right bridge cleanup branches are retained in movementVariants; the representative action uses the first trigger coordinate's branch.",
         ],
     )
     source["coveredLabels"] = [
@@ -8179,7 +8256,17 @@ def cerulean_city_rival_candidates():
                         {
                             "type": "move",
                             "actor": "RIVAL",
-                            "movements": ["DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN"],
+                            "movements": ["RIGHT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN"],
+                            "movementVariants": [
+                                {
+                                    "when": {"playerX": 20},
+                                    "movements": ["RIGHT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN"],
+                                },
+                                {
+                                    "when": {"playerXNot": 20},
+                                    "movements": ["LEFT", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN"],
+                                },
+                            ],
                         },
                         {"type": "hideObject", "textConstant": "TEXT_CERULEANCITY_RIVAL"},
                         {"type": "setEvent", "event": "EVENT_CERULEAN_RIVAL_LEFT"},
@@ -8786,7 +8873,7 @@ def ss_anne_2f_rival_candidate():
         [
             "sourceBlock=SSAnne2FDefaultScript",
             "Generated from the S.S. Anne 2F rival coordinate trigger, Rival2 battle branch, and exit cleanup scripts.",
-            "The source has coordinate-dependent approach/exit movement variants; CaptureQuest currently preserves its tested override during import.",
+            "The source coordinate-dependent approach and exit movement branches are retained in movementVariants.",
         ],
     )
     source["coveredLabels"] = [
@@ -10818,7 +10905,7 @@ def game_corner_rocket_defeated_candidate():
         [
             "sourceBlock=GameCornerRocketBattleScript",
             "sourceBlock=GameCornerRocketExitScript",
-            "The Game Boy script branches between direct and around-player movement based on player coordinates; CaptureQuest currently represents this as its single existing Rocket exit path.",
+            "The Game Boy script branches between direct and around-player movement based on player coordinates; both source branches are retained.",
             "Trainer battle startup remains handled by the trainer runtime/manual guard script; this candidate covers the post-battle dialogue, movement, and object hide cleanup.",
         ],
     )
@@ -10833,7 +10920,6 @@ def game_corner_rocket_defeated_candidate():
     source["movementVariants"] = {
         "direct": direct_movement,
         "aroundPlayer": around_movement,
-        "captureQuest": ["DOWN", "DOWN", "DOWN", "RIGHT", "RIGHT"],
     }
     return [
         {
@@ -10852,7 +10938,16 @@ def game_corner_rocket_defeated_candidate():
             "actions": [
                 {"type": "lockInput"},
                 {"type": "dialogue", "speaker": "ROCKET", "lines": battle_end_lines + after_battle_lines},
-                {"type": "move", "actor": "ROCKET", "movements": ["DOWN", "DOWN", "DOWN", "RIGHT", "RIGHT"]},
+                {
+                    "type": "move",
+                    "actor": "ROCKET",
+                    "movements": around_movement,
+                    "movementVariants": [
+                        {"when": {"playerY": 6}, "movements": direct_movement},
+                        {"when": {"playerX": 8}, "movements": direct_movement},
+                        {"when": {"default": True}, "movements": around_movement},
+                    ],
+                },
                 {"type": "setEvent", "event": "EVENT_GAME_CORNER_ROCKET_LEFT"},
                 {"type": "hideActor", "actor": "ROCKET"},
                 {"type": "unlockInput"},
@@ -10921,7 +11016,7 @@ def rocket_hideout_b4f_giovanni_candidate():
             "sourceBlock=RocketHideoutB4FGiovanniText",
             "sourceBlock=RocketHideoutB4FBeatGiovanniScript",
             "Generated from Giovanni's Rocket Hideout B4F NPC battle and post-battle hide/show cleanup.",
-            "The source performs a fade around object visibility updates; this neutral candidate preserves authoritative gameplay state and leaves fade presentation to CaptureQuest.",
+            "The source performs a fade around object visibility updates; this neutral candidate preserves authoritative gameplay state and leaves fade presentation to downstream renderers.",
         ],
     )
     source["coveredLabels"] = [
@@ -11314,55 +11409,46 @@ def champion_hall_of_fame_runtime_diagnostics():
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomPlayerEntersScript",
-            "captureQuestScript": "ChampionsRoomRivalIntro",
             "runtimeConcepts": ["champion_rival_intro", "forced_player_movement"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomRivalText",
-            "captureQuestScript": "ChampionsRoomRivalIntro",
             "runtimeConcepts": ["champion_rival_intro", "starter_specific_trainer_battle"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomRivalDefeatedScript",
-            "captureQuestScript": "ChampionsRoomVictory",
             "runtimeConcepts": ["champion_victory_sequence", "post_battle_dialogue"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomOakArrivesScript",
-            "captureQuestScript": "ChampionsRoomVictory",
             "runtimeConcepts": ["champion_victory_sequence", "show_oak_actor", "scripted_movement"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomOakComeWithMeScript",
-            "captureQuestScript": "ChampionsRoomVictory",
             "runtimeConcepts": ["champion_victory_sequence", "scripted_movement"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomOakExitsScript",
-            "captureQuestScript": "ChampionsRoomVictory",
             "runtimeConcepts": ["champion_victory_sequence", "hide_oak_actor"],
         },
         {
             "mapName": "ChampionsRoom",
             "scriptLabel": "ChampionsRoomPlayerFollowsOakScript",
-            "captureQuestScript": "ChampionsRoomVictory",
             "runtimeConcepts": ["champion_victory_sequence", "warp_to_hall_of_fame"],
         },
         {
             "mapName": "HallOfFame",
             "scriptLabel": "HallOfFameDefaultScript",
-            "captureQuestScript": "HallOfFameOakCongratulations",
             "runtimeConcepts": ["hall_of_fame_intro_movement"],
         },
         {
             "mapName": "HallOfFame",
             "scriptLabel": "HallOfFameOakCongratulationsScript",
-            "captureQuestScript": "HallOfFameOakCongratulations",
             "runtimeConcepts": ["hall_of_fame_congratulations", "cerulean_cave_unlock"],
         },
     ]
@@ -11375,11 +11461,10 @@ def champion_hall_of_fame_runtime_diagnostics():
                 "status": "covered",
                 "reason": "champion_hall_of_fame_runtime_v1",
                 "details": {
-                    "captureQuestScript": spec["captureQuestScript"],
                     "source": {
                         "runtimeConcepts": spec["runtimeConcepts"],
                         "notes": [
-                            "CaptureQuest intentionally keeps the Champion and Hall of Fame finale as authored file-backed scripts.",
+                            "The Champion and Hall of Fame finale requires a coordinated runtime state machine.",
                             "These source labels are state-machine fragments of that finale, not independent reusable runtime events.",
                         ],
                     },
@@ -11394,127 +11479,106 @@ def oak_intro_runtime_diagnostics():
         {
             "mapName": "PalletTown",
             "scriptLabel": "PalletTownDefaultScript",
-            "captureQuestScript": "PalletTownOakStopsPlayer",
             "runtimeConcepts": ["oak_blocks_north_exit", "oak_intro_start_flag"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLab_Script",
-            "captureQuestScript": "OaksLabChooseStarterIntro/OaksLabPokedexDelivery",
             "runtimeConcepts": ["oak_lab_state_dispatch", "post_pokedex_text_pointer_state"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalText",
-            "captureQuestScript": "OaksLabRivalEntrance/OaksLabChooseStarterIntro/OaksLabRivalPicksStarter",
             "runtimeConcepts": ["rival_flag_gated_intro_dialogue", "starter_choice_dialogue", "post_starter_rival_dialogue"],
         },
         {
             "mapName": "PalletTown",
             "scriptLabel": "PalletTownOakHeyWaitScript",
-            "captureQuestScript": "PalletTownOakStopsPlayer",
             "runtimeConcepts": ["oak_appears", "oak_warning_dialogue"],
         },
         {
             "mapName": "PalletTown",
             "scriptLabel": "PalletTownOakWalksToPlayerScript",
-            "captureQuestScript": "PalletTownOakStopsPlayer",
             "runtimeConcepts": ["oak_approaches_player", "forced_walk_to_lab"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabDefaultScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "oak_actor_visibility"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabOakEntersLabScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "oak_movement"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabHideShowOaksScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "oak_actor_visibility"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabPlayerEntersLabScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "forced_player_movement"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabFollowedOakScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "followed_oak_flags"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabOakChooseMonSpeechScript",
-            "captureQuestScript": "OaksLabChooseStarterIntro",
             "runtimeConcepts": ["oak_lab_intro", "starter_choice_unlocked"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabMonChoiceMenu",
-            "captureQuestScript": "OaksLabChooseBulbasaur/OaksLabChooseCharmander/OaksLabChooseSquirtle",
             "runtimeConcepts": ["starter_choice_prompt"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabSelectedPokeBallScript",
-            "captureQuestScript": "OaksLabChooseBulbasaur/OaksLabChooseCharmander/OaksLabChooseSquirtle",
             "runtimeConcepts": ["starter_choice_gate"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalChoosesStarterScript",
-            "captureQuestScript": "OaksLabRivalPicksStarter",
             "runtimeConcepts": ["rival_starter_choice"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalChallengesPlayerScript",
-            "captureQuestScript": "OaksLabChooseBulbasaur/OaksLabChooseCharmander/OaksLabChooseSquirtle",
             "runtimeConcepts": ["first_rival_battle"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalEndBattleScript",
-            "captureQuestScript": "OaksLabChooseBulbasaur/OaksLabChooseCharmander/OaksLabChooseSquirtle",
             "runtimeConcepts": ["first_rival_battle_completion"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabPlayerWatchRivalExitScript",
-            "captureQuestScript": "OaksLabRivalExitsAfterBattle",
             "runtimeConcepts": ["rival_exit_after_first_battle"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalArrivesAtOaksRequestScript",
-            "captureQuestScript": "OaksLabPokedexDelivery",
             "runtimeConcepts": ["pokedex_delivery_rival_return"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabOakGivesPokedexScript",
-            "captureQuestScript": "OaksLabPokedexDelivery",
             "runtimeConcepts": ["pokedex_delivery", "parcel_turn_in", "route22_rival_setup"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabRivalLeavesWithPokedexScript",
-            "captureQuestScript": "OaksLabPokedexDelivery",
             "runtimeConcepts": ["pokedex_delivery_rival_exit", "route22_rival_setup"],
         },
         {
             "mapName": "OaksLab",
             "scriptLabel": "OaksLabOak1Text",
-            "captureQuestScript": "OaksLabPokedexDelivery/OaksLabOakGivePokeballs/OaksLabOakPokemonAroundWorld",
             "runtimeConcepts": ["oak_parcel_pokedex_dialogue", "oak_free_pokeballs", "oak_pokedex_progress_dialogue"],
         },
     ]
@@ -11527,11 +11591,10 @@ def oak_intro_runtime_diagnostics():
                 "status": "covered",
                 "reason": "oak_intro_runtime_v1",
                 "details": {
-                    "captureQuestScript": spec["captureQuestScript"],
                     "source": {
                         "runtimeConcepts": spec["runtimeConcepts"],
                         "notes": [
-                            "CaptureQuest keeps the Oak intro, starter choice, first rival battle, and Pokedex delivery as authored file-backed scripts.",
+                            "The Oak intro, starter choice, first rival battle, and Pokedex delivery require coordinated runtime state machines.",
                             "These source labels are state-machine fragments that span map transitions, forced movement, starter choice, rival battle setup, and object visibility.",
                         ],
                     },
@@ -11541,26 +11604,25 @@ def oak_intro_runtime_diagnostics():
     return diagnostics
 
 
-def capturequest_authored_runtime_diagnostics():
+def authored_runtime_diagnostics():
+    """Describe source state machines that require downstream runtime support."""
     specs = [
         {
             "mapName": "MtMoonB2F",
             "scriptLabel": "MtMoonB2F_Script",
-            "captureQuestScript": "MtMoonB2FFossilChoice/MtMoonB2FDomeFossilChoice/MtMoonB2FHelixFossilChoice",
             "runtimeConcepts": [
                 "fossil_area_prompt",
                 "fossil_choice",
                 "post_super_nerd_wild_encounter_suppression",
             ],
             "notes": [
-                "CaptureQuest models the Mt. Moon fossil choice with file-backed scripts generated from the source fossil labels.",
+                "The Mt. Moon fossil choice spans several source labels and requires coordinated runtime state.",
                 "The outer map script also toggles no-battle status inside the fossil area after the Super Nerd is beaten; this belongs in server-authoritative encounter suppression rather than a standalone cutscene JSON file.",
             ],
         },
         {
             "mapName": "PewterCity",
             "scriptLabel": "PewterCityDefaultScript",
-            "captureQuestScript": "PewterCityYoungsterGymGuide",
             "runtimeConcepts": ["pre_brock_east_exit_block", "gym_guide_escort", "museum_ticket_reset"],
             "notes": [
                 "The generated Pewter City gym-guide candidate covers the east-exit coordinate check called by the default script.",
@@ -11570,20 +11632,18 @@ def capturequest_authored_runtime_diagnostics():
         {
             "mapName": "VermilionCity",
             "scriptLabel": "VermilionCityLeftSSAnneCallbackScript",
-            "captureQuestScript": "VermilionCitySSAnneDeparture",
             "runtimeConcepts": ["ss_anne_departure_callback", "post_ship_guard_state"],
             "notes": [
-                "CaptureQuest keeps the S.S. Anne departure as an authored file-backed script and guard-state scripts.",
+                "The S.S. Anne departure requires a coordinated runtime flow and guard state.",
                 "This source callback is the map-load latch that hands control to the visible departure flow after EVENT_SS_ANNE_LEFT is set.",
             ],
         },
         {
             "mapName": "VermilionDock",
             "scriptLabel": "VermilionDock_Script",
-            "captureQuestScript": "VermilionCitySSAnneDeparture",
             "runtimeConcepts": ["ss_anne_departure", "dock_exit_walkout", "ship_departed_flag"],
             "notes": [
-                "CaptureQuest represents the S.S. Anne departure with an authored script that sets EVENT_SS_ANNE_LEFT after HM01 is obtained.",
+                "A downstream runtime should set EVENT_SS_ANNE_LEFT during the departure flow after HM01 is obtained.",
                 "The original dock scroll/smoke animation is presentation-specific and should be added as a renderer effect, not generic generated script JSON.",
             ],
         },
@@ -11595,9 +11655,8 @@ def capturequest_authored_runtime_diagnostics():
                 "mapName": spec["mapName"],
                 "scriptLabel": spec["scriptLabel"],
                 "status": "covered",
-                "reason": "capturequest_authored_runtime_v1",
+                "reason": "authored_runtime_coverage_v1",
                 "details": {
-                    "captureQuestScript": spec["captureQuestScript"],
                     "source": {
                         "runtimeConcepts": spec["runtimeConcepts"],
                         "notes": spec["notes"],
@@ -12103,16 +12162,19 @@ TILE_OVERRIDE_ADAPTERS = [
 ]
 
 
-def insert_candidate(cursor, candidate):
+def insert_candidate(cursor, candidate, map_resolver):
     encoded = json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+    map_id = map_resolver.resolve(candidate["mapName"])
     cursor.execute(
         """
         INSERT INTO script_event_candidates
-            (map_name, script_label, trigger_type, trigger_label, confidence, candidate_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (map_name, map_id, script_label, trigger_type, trigger_label,
+             confidence, candidate_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             candidate["mapName"],
+            map_id,
             candidate["scriptLabel"],
             candidate["trigger"]["type"],
             candidate["trigger"]["label"],
@@ -12120,6 +12182,53 @@ def insert_candidate(cursor, candidate):
             encoded,
         ),
     )
+    candidate_id = cursor.lastrowid
+
+    for action_index, action in enumerate(candidate.get("actions", [])):
+        cursor.execute(
+            """
+            INSERT INTO script_event_candidate_actions
+                (candidate_id, action_index, action_type, action_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                action_index,
+                action.get("type", "unknown"),
+                canonical_json(action),
+            ),
+        )
+
+    for condition_path, value_index, value in normalized_condition_rows(
+        candidate.get("conditions", {})
+    ):
+        cursor.execute(
+            """
+            INSERT INTO script_event_candidate_conditions
+                (candidate_id, condition_path, value_index, condition_value_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (candidate_id, condition_path, value_index, canonical_json(value)),
+        )
+
+    for reference_kind, json_path, reference_index, value in candidate_reference_rows(
+        candidate
+    ):
+        cursor.execute(
+            """
+            INSERT INTO script_event_candidate_references
+                (candidate_id, reference_kind, json_path, reference_index,
+                 reference_value_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                reference_kind,
+                json_path,
+                reference_index,
+                canonical_json(value),
+            ),
+        )
 
     if candidate["trigger"]["type"] == "coord":
         cursor.execute(
@@ -12128,23 +12237,32 @@ def insert_candidate(cursor, candidate):
         )
         for coord in candidate["trigger"].get("coordinates", []):
             cursor.execute(
-                "INSERT INTO coordinate_triggers (map_name, label, x, y) VALUES (?, ?, ?, ?)",
-                (candidate["mapName"], candidate["trigger"]["label"], coord["x"], coord["y"]),
+                """INSERT INTO coordinate_triggers
+                   (map_name, map_id, label, x, y) VALUES (?, ?, ?, ?, ?)""",
+                (
+                    candidate["mapName"],
+                    map_id,
+                    candidate["trigger"]["label"],
+                    coord["x"],
+                    coord["y"],
+                ),
             )
 
 
-def insert_ir_block(cursor, block):
+def insert_ir_block(cursor, block, map_resolver):
+    map_id = map_resolver.resolve(block["mapName"])
     cursor.execute(
         """
         INSERT INTO script_event_ir_blocks (
-            map_name, label, kind, features_json, text_refs_json, event_refs_json,
-            item_refs_json, pokemon_refs_json, movement_refs_json, object_refs_json,
-            battle_refs_json, warp_refs_json, raw_asm
+            map_name, map_id, label, kind, features_json, text_refs_json,
+            event_refs_json, item_refs_json, pokemon_refs_json, movement_refs_json,
+            object_refs_json, battle_refs_json, warp_refs_json, raw_asm
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             block["mapName"],
+            map_id,
             block["label"],
             block["kind"],
             canonical_json(block["features"]),
@@ -12159,6 +12277,32 @@ def insert_ir_block(cursor, block):
             block["rawAsm"],
         ),
     )
+    ir_block_id = cursor.lastrowid
+    for reference_kind, field_name in (
+        ("text", "textRefs"),
+        ("event", "eventRefs"),
+        ("item", "itemRefs"),
+        ("pokemon", "pokemonRefs"),
+        ("movement", "movementRefs"),
+        ("object", "objectRefs"),
+        ("battle", "battleRefs"),
+        ("warp", "warpRefs"),
+    ):
+        for reference_index, value in enumerate(block.get(field_name, [])):
+            cursor.execute(
+                """
+                INSERT INTO script_event_ir_references
+                    (ir_block_id, reference_kind, reference_index,
+                     reference_value_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    ir_block_id,
+                    reference_kind,
+                    reference_index,
+                    canonical_json(value),
+                ),
+            )
 
 
 def insert_in_game_trade(cursor, trade):
@@ -12277,15 +12421,17 @@ def insert_object_visibility_rule(cursor, rule):
     )
 
 
-def insert_diagnostic(cursor, diagnostic):
+def insert_diagnostic(cursor, diagnostic, map_resolver):
+    map_id = map_resolver.resolve(diagnostic["mapName"], allow_global=True)
     cursor.execute(
         """
         INSERT INTO script_event_candidate_diagnostics
-            (map_name, script_label, status, reason, details_json)
-            VALUES (?, ?, ?, ?, ?)
+            (map_name, map_id, script_label, status, reason, details_json)
+            VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             diagnostic["mapName"],
+            map_id,
             diagnostic["scriptLabel"],
             diagnostic["status"],
             diagnostic["reason"],
@@ -12296,6 +12442,232 @@ def insert_diagnostic(cursor, diagnostic):
 
 def canonical_json(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def normalized_condition_rows(conditions):
+    """Flatten condition leaves without discarding their JSON type or order."""
+    rows = []
+
+    def visit(value, path):
+        if isinstance(value, dict):
+            for key in sorted(value):
+                visit(value[key], f"{path}.{key}" if path else key)
+        elif isinstance(value, list):
+            if not value:
+                rows.append((path, 0, []))
+            else:
+                for index, item in enumerate(value):
+                    if isinstance(item, (dict, list)):
+                        visit(item, f"{path}[{index}]")
+                    else:
+                        rows.append((path, index, item))
+        else:
+            rows.append((path or "$", 0, value))
+
+    visit(conditions, "")
+    return rows
+
+
+REFERENCE_KEYS = {
+    "event": {
+        "event", "events", "flag", "flags", "requiresevent",
+        "requiresevents", "requireseventabsent", "requireseventsabsent",
+        "completionevent", "winevent",
+    },
+    "item": {"item", "itemid", "itemname", "requireditem"},
+    "pokemon": {"pokemon", "pokemonid", "species", "requestedpokemon", "offeredpokemon"},
+    "movement": {"movement", "movementlabel", "movementsequence"},
+    "object": {"object", "objectkey", "objectname", "missableobject"},
+    "map": {"map", "mapid", "mapname", "destinationmap", "destinationmapname"},
+    "script": {"script", "scriptlabel", "sourcelabel", "label"},
+    "text": {"text", "textconstant", "textlabel", "dialoguelabel", "dialoguelabels"},
+    "battle": {"battle", "trainer", "trainerclass", "trainerid"},
+    "warp": {"warp", "warpid", "destinationwarp", "destinationwarpid"},
+}
+
+
+def candidate_reference_rows(candidate):
+    """Extract typed gameplay references from the neutral candidate structure."""
+    key_to_kind = {
+        key: kind for kind, keys in REFERENCE_KEYS.items() for key in keys
+    }
+    rows = []
+
+    def emit(kind, path, value):
+        values = value if isinstance(value, list) else [value]
+        for index, item in enumerate(values):
+            if isinstance(item, (str, int)) and not isinstance(item, bool):
+                rows.append((kind, path, index, item))
+
+    def visit(value, path, *, include=True):
+        if isinstance(value, dict):
+            for key in sorted(value):
+                child = value[key]
+                child_path = f"{path}.{key}" if path else key
+                normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+                kind = key_to_kind.get(normalized_key)
+                if kind:
+                    emit(kind, child_path, child)
+                visit(child, child_path, include=include)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}[{index}]", include=include)
+
+    # Source metadata is provenance rather than a gameplay reference.
+    for section in ("trigger", "conditions", "actions"):
+        visit(candidate.get(section, {}), section)
+    return rows
+
+
+def validate_normalized_script_tables(conn):
+    """Prove the relational projections exactly cover their compatibility JSON."""
+    required = {
+        "script_event_candidate_actions",
+        "script_event_candidate_conditions",
+        "script_event_candidate_references",
+        "script_event_ir_references",
+    }
+    present = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    if missing := required - present:
+        raise ValueError(f"Missing normalized script tables: {sorted(missing)}")
+
+    for table in ("script_event_candidates", "script_event_ir_blocks"):
+        unresolved = conn.execute(
+            f'SELECT COUNT(*) FROM "{table}" WHERE map_id IS NULL'
+        ).fetchone()[0]
+        if unresolved:
+            raise ValueError(f"{table} has {unresolved} unresolved map relationships")
+
+    invalid_diagnostic_maps = conn.execute(
+        """
+        SELECT COUNT(*) FROM script_event_candidate_diagnostics
+        WHERE (map_name = 'GLOBAL' AND map_id IS NOT NULL)
+           OR (map_name <> 'GLOBAL' AND map_id IS NULL)
+        """
+    ).fetchone()[0]
+    if invalid_diagnostic_maps:
+        raise ValueError(
+            "script_event_candidate_diagnostics has invalid global/map relationships"
+        )
+
+    for candidate_id, encoded in conn.execute(
+        "SELECT id, candidate_json FROM script_event_candidates ORDER BY id"
+    ):
+        candidate = json.loads(encoded)
+        expected_actions = [
+            (index, action.get("type", "unknown"), canonical_json(action))
+            for index, action in enumerate(candidate.get("actions", []))
+        ]
+        actual_actions = conn.execute(
+            """
+            SELECT action_index, action_type, action_json
+            FROM script_event_candidate_actions
+            WHERE candidate_id = ? ORDER BY action_index
+            """,
+            (candidate_id,),
+        ).fetchall()
+        if actual_actions != expected_actions:
+            raise ValueError(f"Normalized action coverage mismatch for candidate {candidate_id}")
+
+        expected_conditions = [
+            (path, index, canonical_json(value))
+            for path, index, value in normalized_condition_rows(
+                candidate.get("conditions", {})
+            )
+        ]
+        actual_conditions = conn.execute(
+            """
+            SELECT condition_path, value_index, condition_value_json
+            FROM script_event_candidate_conditions
+            WHERE candidate_id = ? ORDER BY condition_path, value_index
+            """,
+            (candidate_id,),
+        ).fetchall()
+        if actual_conditions != sorted(expected_conditions):
+            raise ValueError(
+                f"Normalized condition coverage mismatch for candidate {candidate_id}"
+            )
+
+        expected_references = sorted(
+            (kind, path, index, canonical_json(value))
+            for kind, path, index, value in candidate_reference_rows(candidate)
+        )
+        actual_references = conn.execute(
+            """
+            SELECT reference_kind, json_path, reference_index, reference_value_json
+            FROM script_event_candidate_references
+            WHERE candidate_id = ?
+            ORDER BY reference_kind, json_path, reference_index
+            """,
+            (candidate_id,),
+        ).fetchall()
+        if actual_references != expected_references:
+            raise ValueError(
+                f"Normalized reference coverage mismatch for candidate {candidate_id}"
+            )
+
+    ir_fields = (
+        ("text", "text_refs_json"),
+        ("event", "event_refs_json"),
+        ("item", "item_refs_json"),
+        ("pokemon", "pokemon_refs_json"),
+        ("movement", "movement_refs_json"),
+        ("object", "object_refs_json"),
+        ("battle", "battle_refs_json"),
+        ("warp", "warp_refs_json"),
+    )
+    columns = ", ".join(column for _, column in ir_fields)
+    for row in conn.execute(
+        f"SELECT id, {columns} FROM script_event_ir_blocks ORDER BY id"
+    ):
+        ir_block_id, *encoded_fields = row
+        expected = []
+        for (kind, _), encoded_values in zip(ir_fields, encoded_fields):
+            expected.extend(
+                (kind, index, canonical_json(value))
+                for index, value in enumerate(json.loads(encoded_values))
+            )
+        actual = conn.execute(
+            """
+            SELECT reference_kind, reference_index, reference_value_json
+            FROM script_event_ir_references
+            WHERE ir_block_id = ? ORDER BY reference_kind, reference_index
+            """,
+            (ir_block_id,),
+        ).fetchall()
+        if actual != sorted(expected):
+            raise ValueError(
+                f"Normalized IR reference coverage mismatch for block {ir_block_id}"
+            )
+
+    errors = []
+    relationship_tables = required | {
+        "script_event_candidates",
+        "script_event_ir_blocks",
+        "script_event_candidate_diagnostics",
+    }
+    for table in sorted(relationship_tables):
+        errors.extend(conn.execute(f'PRAGMA foreign_key_check("{table}")').fetchall())
+    if errors:
+        raise ValueError(f"Normalized script foreign-key violations: {errors[:10]}")
+
+    return {
+        "actions": conn.execute(
+            "SELECT COUNT(*) FROM script_event_candidate_actions"
+        ).fetchone()[0],
+        "conditions": conn.execute(
+            "SELECT COUNT(*) FROM script_event_candidate_conditions"
+        ).fetchone()[0],
+        "candidateReferences": conn.execute(
+            "SELECT COUNT(*) FROM script_event_candidate_references"
+        ).fetchone()[0],
+        "irReferences": conn.execute(
+            "SELECT COUNT(*) FROM script_event_ir_references"
+        ).fetchone()[0],
+    }
 
 
 def generated_candidate_diagnostic(candidate):
@@ -12384,15 +12756,18 @@ def generated_conditional_dialogue_diagnostic(row):
     }
 
 
-def main():
+def main(runtime_profile=None):
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     cursor = create_tables(conn)
+    map_resolver = CanonicalMapResolver.from_connection(conn)
 
     ir_blocks = extract_script_ir()
     trade_definitions = in_game_trade_definitions()
     candidates = []
     for adapter in ADAPTERS:
         candidates.extend(adapter())
+    candidates = apply_candidate_profile(candidates, runtime_profile)
     tile_override_candidates = []
     for adapter in TILE_OVERRIDE_ADAPTERS:
         tile_override_candidates.extend(adapter())
@@ -12401,10 +12776,10 @@ def main():
     conditional_dialogue = conditional_dialogue_rows()
 
     for block in sorted(ir_blocks, key=lambda row: (row["mapName"], row["label"])):
-        insert_ir_block(cursor, block)
+        insert_ir_block(cursor, block, map_resolver)
 
     for candidate in sorted(candidates, key=lambda row: (row["mapName"], row["scriptLabel"])):
-        insert_candidate(cursor, candidate)
+        insert_candidate(cursor, candidate, map_resolver)
 
     for trade in trade_definitions:
         insert_in_game_trade(cursor, trade)
@@ -12436,8 +12811,8 @@ def main():
     diagnostics.extend(champion_hof_diagnostics)
     oak_intro_diagnostics = oak_intro_runtime_diagnostics()
     diagnostics.extend(oak_intro_diagnostics)
-    capturequest_authored_diagnostics = capturequest_authored_runtime_diagnostics()
-    diagnostics.extend(capturequest_authored_diagnostics)
+    authored_diagnostics = authored_runtime_diagnostics()
+    diagnostics.extend(authored_diagnostics)
     pallet_daisy_diagnostics = pallet_daisy_map_load_runtime_diagnostics()
     diagnostics.extend(pallet_daisy_diagnostics)
     pokemon_tower7f_rocket_exit_diagnostics = pokemon_tower7f_rocket_exit_runtime_diagnostics()
@@ -12468,7 +12843,7 @@ def main():
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in trainer_flag_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in champion_hof_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in oak_intro_diagnostics)
-    generated_labels.update(diagnostic["scriptLabel"] for diagnostic in capturequest_authored_diagnostics)
+    generated_labels.update(diagnostic["scriptLabel"] for diagnostic in authored_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in pallet_daisy_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in pokemon_tower7f_rocket_exit_diagnostics)
     generated_labels.update(diagnostic["scriptLabel"] for diagnostic in cinnabar_gym_default_diagnostics)
@@ -12490,9 +12865,11 @@ def main():
         if diagnostic:
             diagnostics.append(diagnostic)
 
+    diagnostics = apply_diagnostic_profile(diagnostics, runtime_profile)
     for diagnostic in sorted(diagnostics, key=lambda row: (row["status"], row["mapName"], row["scriptLabel"])):
-        insert_diagnostic(cursor, diagnostic)
+        insert_diagnostic(cursor, diagnostic, map_resolver)
 
+    validate_normalized_script_tables(conn)
     conn.commit()
     conn.close()
 

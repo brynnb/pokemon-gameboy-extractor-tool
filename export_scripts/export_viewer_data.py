@@ -9,6 +9,7 @@ pokemon-phaser/public/viewer-assets.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import shutil
 import sqlite3
@@ -38,6 +39,18 @@ def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def deterministic_generation_time(conn: sqlite3.Connection) -> tuple[str, int]:
+    rows = conn.execute(
+        "SELECT source_date_epoch FROM extraction_runs"
+    ).fetchall()
+    if len(rows) != 1:
+        raise ValueError(
+            f"Expected one deterministic extraction run, found {len(rows)}"
+        )
+    epoch = int(rows[0][0])
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(), epoch
 
 
 def clean_output_dirs() -> None:
@@ -213,6 +226,7 @@ def export_static_json(conn: sqlite3.Connection) -> dict[str, int]:
                 x,
                 y,
                 destination_map,
+                destination_kind,
                 destination_map_id,
                 destination_x,
                 destination_y,
@@ -242,10 +256,10 @@ def main() -> None:
         raise FileNotFoundError(f"Missing database: {DB_PATH}")
 
     clean_output_dirs()
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         counts = export_static_json(conn)
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         tile_images = rows_to_dicts(
             conn.execute(
@@ -256,11 +270,13 @@ def main() -> None:
                 """
             )
         )
+        generated_at, source_date_epoch = deterministic_generation_time(conn)
 
     counts["copiedTileImages"] = copy_tile_assets(tile_images)
     counts["copiedSprites"] = copy_sprite_assets()
     manifest = {
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "generatedAt": generated_at,
+        "sourceDateEpoch": source_date_epoch,
         "counts": counts,
     }
     write_json(VIEWER_DATA_DIR / "manifest.json", manifest)

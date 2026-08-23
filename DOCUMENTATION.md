@@ -1,505 +1,492 @@
-# Pokemon Game Boy Extractor Documentation
+# Extractor architecture and data reference
 
-This is the full reference for the extractor repo. The root `README.md` is the
-quick-start; this file holds the longer pipeline, schema, map, viewer, and
-maintenance notes.
+This is the technical reference for the Pokémon Game Boy Extractor Tool. The
+root [README.md](README.md) is the quick start, and
+[MIGRATING.md](MIGRATING.md) describes consumer-facing changes from the older
+unversioned artifacts.
 
-## Source Model
+## Scope and design
 
-This repo extracts Pokemon Red/Blue data from the `pokemon-game-data`
-submodule, which tracks source files from the `pokered` disassembly. It does
-not include a Pokemon ROM image.
+The extractor reads the pinned `pokemon-game-data` (`pret/pokered`) source tree
+and publishes a reusable source-data release. It intentionally separates four
+concerns:
 
-Generated artifacts are source data for downstream tools and games. They are
-not runtime persistence databases, and they are intentionally project-neutral.
-Downstream projects decide how to map source constants to app IDs, persistence,
-networking, UI, battle state, party state, and script execution.
+1. **Source extraction** parses Red/Blue assembly, binary map data, graphics,
+   and constants into normalized relational/JSON records.
+2. **Catalog and provenance** records release identity, extractor/source Git
+   revisions, source hashes, and source relationships already exposed by
+   extracted rows.
+3. **Media conversion** decodes supported graphics to PNG and optionally
+   renders source-engine audio to FLAC/Ogg.
+4. **Consumption** belongs to downstream games, editors, importers, and the
+   bundled read-only viewer. Runtime policy is not embedded in the core data.
 
-## Canonical Commands
-
-Fresh setup:
-
-```bash
-git clone https://github.com/brynnb/pokemon-gameboy-extractor-tool.git --recurse-submodules
-cd pokemon-gameboy-extractor-tool
-npm install
-```
-
-Generate everything:
-
-```bash
-npm run generate
-```
-
-Run only the extractor pipeline:
-
-```bash
-npm run export
-```
-
-Run the offline viewer:
-
-```bash
-npm run viewer
-```
-
-Build the offline viewer:
-
-```bash
-npm run viewer:build
-```
+The repository does not contain a game ROM. The audio workflow builds a small
+GBS music-player container around the source audio engine; it does not require
+or distribute a retail ROM image.
 
 ## Requirements
 
-- Node/npm for package scripts and the Phaser viewer.
-- Python 3 for extraction scripts.
-- Pillow from `requirements.txt`.
-- RGBDS, specifically `rgbgfx`, for tileset conversion. Source-audio rendering
-  also uses `rgbasm`, `rgblink`, and `rgbfix`.
-- `gbsplay` and `oggenc` if you want to render browser-playable audio assets
-  from `audio_manifest.json`.
+### Canonical extraction
 
-Install RGBDS:
+- Git with submodule support.
+- Python 3.10 or newer, with virtual-environment support recommended.
+- Pillow, installed from `requirements.txt`.
+- RGBDS with `rgbgfx` for Game Boy planar graphics conversion.
+- Node.js/npm for the convenience scripts and offline viewer.
 
-```bash
-# macOS
-brew install rgbds
-
-# Ubuntu/Debian
-sudo apt-get install rgbds
-```
-
-`npm install` initializes the submodule and installs the nested viewer
-dependencies. `npm run generate` creates or reuses a Python virtual environment
-at `.venv` unless `PYTHON_VENV` points elsewhere.
-
-## Outputs
-
-Generated and ignored outputs:
-
-- `pokemon.db`
-- `script_event_candidates.json`
-- `script_event_conditional_dialogue.json`
-- `script_event_in_game_trades.json`
-- `script_event_ir.json`
-- `script_event_diagnostics.json`
-- `audio_manifest.json`
-- `export_scripts/tile_images/*.png`
-- `pokemon-phaser/public/viewer-data/**`
-- `pokemon-phaser/public/viewer-assets/**`
-
-Tracked source-derived reference outputs:
-
-- `script_event_boulder_targets.json`
-- `script_event_tile_overrides.json`
-
-The tracked JSON files are stable source-derived references used by downstream
-importers. The larger database and viewer outputs are reproducible build
-artifacts.
-
-## Pipeline Order
-
-`export_scripts/reprocess.py` is the canonical pipeline. Run it through
-`npm run export` or `npm run generate`.
-
-1. `export_map.py`
-2. `export_warps.py`
-3. `update_zone_coordinates.py`
-4. `create_zones_and_tiles.py`
-5. `export_items.py`
-6. `export_objects.py`
-7. `update_object_coordinates.py`
-8. `export_pokemon.py`
-9. `export_moves.py`
-10. `export_text.py`
-11. `export_learnsets.py`
-12. `export_wild_encounters.py`
-13. `export_trainers.py`
-14. `export_hidden_objects.py`
-15. `export_map_scripts.py`
-16. `export_script_candidates.py`
-17. `export_audio_manifest.py`
-18. `export_viewer_data.py`
-
-The order matters:
-
-- map/tile base tables must exist before warps, objects, and final tile
-  expansion
-- overworld offsets must be calculated before final `tiles` coordinates are
-  generated
-- items must exist before visible item balls can resolve `item_id`
-- objects, text, trainers, hidden/missable objects, and map scripts must exist
-  before script candidates can be generated
-- Pokemon, moves, hidden objects, and map music must exist before audio metadata
-  can join Pokemon cries, move SFX, and map music constants
-- viewer JSON/assets are generated last from the completed SQLite database
-
-## Audio Manifest And Rendering
-
-`export_audio_manifest.py` emits `audio_manifest.json`, a project-neutral index
-of Red/Blue music constants, SFX constants, map music assignments, move SFX, and
-Pokemon cry metadata. The manifest uses stable browser paths such as
-`/sound/pokemon/music/pallet_town.ogg` but does not render or copy files by
-itself.
-
-To render OGG assets from the source audio engine:
+The setup path is:
 
 ```bash
-npm run render:audio -- --build-rom --kind music --out-dir rendered-audio --seconds 90 --fade 3
-npm run render:audio -- --build-rom --kind sfx --out-dir rendered-audio --seconds 6 --fade 0
-npm run render:audio -- --build-rom --kind cries --out-dir rendered-audio --seconds 4 --fade 0
+git clone --recurse-submodules https://github.com/brynnb/pokemon-gameboy-extractor-tool.git
+cd pokemon-gameboy-extractor-tool
+npm run setup
+npm run generate
 ```
 
-`--kind cries` renders species-specific cry files with each Pokemon's source
-pitch and length modifiers applied. `--kind base-cries` renders the raw shared
-base cry constants for debugging or fallback assets.
+If the submodule was omitted during clone:
 
-`--build-rom` creates a temporary audio-only Game Boy ROM per constant, runs it
-through `gbsplay`, and encodes the WAV output with `oggenc`. This avoids needing
-a full game ROM build and keeps the extractor neutral; downstream projects
-choose their own `--out-dir`.
+```bash
+git submodule update --init --recursive
+```
 
-Running individual scripts is useful for debugging, but many scripts depend on
-tables created by earlier stages.
+The supported Python range is 3.10 or newer. The npm workflows require Node.js
+20.19 or newer and npm 10 or newer; `.nvmrc` pins the tested Node release.
+`npm run setup` uses `npm ci` for the viewer's locked dependency tree.
 
-## Database Reference
+`generate.sh` manages `.venv` by default and installs the exact Pillow version
+from `requirements.txt`. Set `PYTHON_VENV` to use a different environment. A
+caller-provided environment is never deleted when setup fails.
 
-The current generated `pokemon.db` has **43 tables**. Counts below come from the
-current local database generated by the canonical pipeline.
+### Optional audio rendering
 
-### Maps, Tiles, And Collision
+Audio rendering additionally needs:
 
-| Table | Rows | Purpose |
-| --- | ---: | --- |
-| `maps` | 248 | Source map constants, dimensions, tileset IDs, raw block data, connection columns, and `is_overworld`. |
-| `map_connections` | 78 | Source north/south/east/west connections and block offsets between maps. |
-| `overworld_map_positions` | 36 | Global stitched offsets for overworld maps. |
-| `tilesets` | 19 | Tileset IDs with source blockset and tileset paths. |
-| `blocksets` | 1,435 | 4x4 Game Boy tile blocks by tileset and block index. |
-| `tileset_tiles` | 1,696 | Decoded 8x8 source tile bytes by tileset. |
-| `collision_tiles` | 225 | Source collision tile IDs by tileset. |
-| `tiles_raw` | 23,719 | Expanded map block references before final 16x16 square/tile-image expansion. |
-| `tile_images` | 826 | Deduplicated generated 16x16 PNG tiles with source tileset/block/position metadata. |
-| `tiles` | 94,876 | Final renderable map squares with global/local coordinates, `tile_image_id`, overworld marker, and `collision_type`. |
+- RGBDS (`rgbasm` and `rgblink`);
+- `gbsplay`; and
+- FFmpeg built with FLAC and `libvorbis` support.
 
-`tiles.collision_type` is coarse exported terrain data. Runtime-specific
-movement rules such as ledges, surf, boulders, object collision, script tile
-replacement, warps, and event flags should be enforced by the consuming
-runtime.
+The renderer checks for these commands before starting. It surfaces emulator
+warnings; `--strict-emulator-warnings` turns otherwise non-fatal warnings into
+errors.
 
-### Objects, Warps, And Map Runtime Data
+## Canonical pipeline
 
-| Table | Rows | Purpose |
-| --- | ---: | --- |
-| `objects` | 1,119 | NPC, sign, and visible item objects with coordinates, sprite/text/action fields, and trainer links. |
-| `warps` | 805 | Resolved warp rows with source/destination map IDs and destination coordinates when available. |
-| `warp_events` | 805 | Source warp-event rows with destination map constants and destination warp indices. |
-| `hidden_items` | 54 | Hidden item coordinates. |
-| `hidden_coins` | 12 | Hidden Game Corner coin coordinates. |
-| `hidden_objects` | 198 | Hidden/sign/object metadata extracted from map scripts. |
-| `missable_objects` | 227 | Resolved `HS_*` hide/show constants with map/object identity and initial visibility. |
-| `map_music` | 248 | Source map music constants. |
-| `map_scripts` | 381 | Map script labels, script constants, and raw ASM blocks. |
-| `npc_movement_data` | 28 | Named source NPC movement lists. |
-| `coordinate_triggers` | 98 | Source coordinate script triggers. |
-| `event_flags` | 265 | Event flag references found in map scripts. |
-| `spin_tiles` | 71 | Source-backed spin/arrow forced-movement tiles from `map_coord_movement` data. |
+`npm run export` runs `export_scripts/reprocess.py`. Its order is intentional:
 
-`objects.object_type` currently contains 796 NPCs, 201 signs, and 122 visible
-items. Trainer NPCs link through `objects.trainer_class` and
-`objects.trainer_party_index`.
+1. map/tileset catalog and connections;
+2. warps and stitched overworld positions;
+3. final 16×16 map tiles and tile images;
+4. items, objects, and object coordinates;
+5. species/evolutions, moves, text, learnsets, encounters, and trainers;
+6. hidden objects, map scripts, and neutral script candidates;
+7. normalized audio manifest/catalog;
+8. complete graphics catalog and deterministic planar decodes;
+9. release/run/source/entity provenance metadata; and
+10. viewer JSON/assets.
 
-### Pokemon, Moves, Items, Trainers, And Encounters
+Release metadata runs after every database-producing exporter so its entity
+catalog sees the finished schema. Viewer export runs last because it consumes
+the completed database and generated tile images.
 
-| Table | Rows | Purpose |
-| --- | ---: | --- |
-| `pokemon` | 151 | Base stats, types, catch/base EXP, Pokedex data, level evolution hints, icons, and palettes. |
-| `moves` | 154 | Move IDs, names, type, power, accuracy, PP, animation/sound metadata, grammar, HM/field effect flags. |
-| `pokemon_learnset` | 728 | Level-up learnsets by Pokemon and level. |
-| `pokemon_tmhm` | 2,980 | TM/HM compatibility rows by Pokemon. |
-| `items` | 138 | Item names, prices, usability, vending prices, TM/HM move links, guard-drink and key-item flags. |
-| `trainer_classes` | 47 | Trainer class constants, display names, prize-money bases, gym/Elite Four/rival flags. |
-| `trainer_parties` | 391 | Trainer party headers by class and party index. |
-| `trainer_party_pokemon` | 994 | Party slots, Pokemon constants, and levels. |
-| `trainer_headers` | 322 | Map trainer headers with event flags, trainer-specific sight ranges, and battle/end/after text labels. |
-| `wild_encounters` | 947 | Grass/water/rod encounter rows by map/version/slot. |
-| `encounter_slots` | 10 | Gen 1 encounter slot probabilities. |
+### Staging and publication
 
-Trainer sight range is trainer-specific. It comes from the second numeric
-argument in Red/Blue's `trainer` macro and is exported as
-`trainer_headers.sight_range`.
+Every managed output is generated at a private sibling staging path. The
+pipeline then validates the staged database and companion bundles. With
+`--with-audio`, all 561 FLAC/Ogg pairs and their render manifest join that same
+staged release. On success, companions are renamed into place and the database
+is installed last as the release commit marker. If a handled publication error
+occurs, already replaced outputs are rolled back and recoverable backups are
+retained if rollback itself cannot finish.
 
-### Dialogue And Text
+Consequences for automation:
 
-| Table | Rows | Purpose |
-| --- | ---: | --- |
-| `dialogue_text` | 2,430 | Source dialogue labels, source file path, and decoded dialogue text. |
-| `text_pointers` | 1,207 | Map text constants mapped to local labels, dialogue labels, pointer indices, and trainer marker. |
+- a failed exporter or validation does not overwrite the previous successful
+  release;
+- configured outputs should remain on filesystems that support atomic rename;
+- consumers should treat the database replacement as the indication that the
+  companion bundle is current; and
+- individual exporter scripts are useful for development, but bypass the
+  all-artifact staging contract.
 
-Dialogue text keeps source labels and source structure so downstream runtimes
-can apply their own paging, placeholders, text speed, and UI behavior.
+## Output layout
 
-### Script Candidate Data
+| Default path | Path semantics | Description |
+| --- | --- | --- |
+| `pokemon.db` | SQLite file | Canonical relational artifact. |
+| `script_event_candidates.json` | JSON file | Neutral recognized script behaviors. |
+| `script_event_ir.json` | JSON file | Source script-block inventory and references. |
+| `script_event_diagnostics.json` | JSON file | Generated/covered/unsupported coverage records. |
+| `script_event_in_game_trades.json` | JSON file | Source trade definitions and call sites. |
+| `script_event_tile_overrides.json` | JSON file | Source-backed dynamic tile replacements. |
+| `script_event_boulder_targets.json` | JSON file | Victory Road boulder target relationships. |
+| `script_event_object_visibility.json` | JSON file | Event-conditioned object visibility records. |
+| `script_event_conditional_dialogue.json` | JSON file | Prioritized conditional dialogue branches. |
+| `audio_manifest.json` | JSON file | Versioned audio catalog and logical output paths. |
+| `build/graphics/decoded/**` | Relative to graphics root | PNGs decoded from every supported `.1bpp`/`.2bpp` source. |
+| `export_scripts/tile_images/**` | Relative to repository | Deduplicated 16×16 map-square PNGs. |
+| `pokemon-phaser/public/viewer-data/**` | Viewer-local | Static JSON split by map where appropriate. |
+| `pokemon-phaser/public/viewer-assets/**` | Viewer-local | Tile and sprite assets needed by the viewer. |
 
-| Table | Rows | Purpose |
-| --- | ---: | --- |
-| `script_event_ir_blocks` | 3,496 | Inventory of source script blocks and detected text/event/item/Pokemon/movement/object/battle/warp references. |
-| `script_event_candidates` | 299 | Neutral generated script candidates. Current trigger counts: 225 `npc_click`, 48 `coord`, 26 `map_script`. |
-| `script_event_candidate_diagnostics` | 1,154 | Coverage diagnostics. Current statuses: 387 `generated`, 709 `covered`, 58 `unsupported`. |
-| `script_event_conditional_dialogue` | 49 | Conditional dialogue branches keyed by text constant and flag requirements. |
-| `script_event_in_game_trades` | 10 | In-game trade definitions joined from source trade tables and map script call sites. |
-| `script_event_tile_overrides` | 25 | Neutral tile replacement candidates for event-driven map state. |
-| `script_event_boulder_targets` | 5 | Victory Road boulder switch/hole target data from source coordinate tables. |
+Source graphics are cataloged in the database instead of being redundantly
+copied. `graphic_assets.path_scope` tells consumers whether `relative_path` is
+relative to the repository (`repository`) or the configured graphics output
+root (`graphics_output`).
 
-Script candidates preserve source constants and behavioral intent, but
-downstream runtimes still decide how to map item IDs, party/battle state,
-movement/cutscene presentation, persistence, networking, and UI.
+Audio manifest/DB paths such as `/sound/pokemon/music/pallet_town.ogg` are
+logical web paths. When rendering, the leading slash is removed and the path is
+created underneath `--out-dir`; traversal components are rejected.
 
-## Important Relationships
+## Configuration
 
-- `tiles.map_id -> maps.id`
-- `tiles.tile_image_id -> tile_images.id`
-- `tiles_raw.map_id -> maps.id`
-- `tiles_raw.tileset_id -> tilesets.id`
-- `tile_images.tileset_id -> tilesets.id`
-- `objects.map_id -> maps.id`
-- `objects.item_id -> items.id`
-- `warps.source_map_id -> maps.id`
-- `warps.destination_map_id -> maps.id`
-- `trainer_parties.trainer_class_id -> trainer_classes.id`
-- `trainer_party_pokemon.trainer_party_id -> trainer_parties.id`
-- `trainer_headers.map_name -> maps.name`
+During checkout-based execution, relative overrides are resolved against the
+repository root. Installed entry points configure absolute workspace defaults;
+prefer absolute output overrides when invoking an installed command. The
+central pipeline stages and atomically publishes each configured managed
+output.
 
-## Common Queries
+| Environment variable | Default |
+| --- | --- |
+| `POKEMON_EXTRACTOR_WORKSPACE` | Current directory (installed commands only) |
+| `POKEMON_EXTRACTOR_PROJECT_ROOT` | extractor checkout/workspace root |
+| `POKEMON_EXTRACTOR_GAME_DATA_ROOT` | `pokemon-game-data` |
+| `POKEMON_EXTRACTOR_DB` | `pokemon.db` |
+| `POKEMON_EXTRACTOR_TILE_IMAGE_DIR` | `export_scripts/tile_images` |
+| `POKEMON_EXTRACTOR_GRAPHICS_DIR` | `build/graphics` |
+| `POKEMON_EXTRACTOR_AUDIO_DIR` | `build/audio` |
+| `POKEMON_EXTRACTOR_AUDIO_MANIFEST` | `audio_manifest.json` |
+| `POKEMON_EXTRACTOR_VIEWER_PUBLIC_DIR` | `pokemon-phaser/public` |
+| `POKEMON_EXTRACTOR_VIEWER_DATA_DIR` | `<viewer-public>/viewer-data` |
+| `POKEMON_EXTRACTOR_VIEWER_ASSET_DIR` | `<viewer-public>/viewer-assets` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_CANDIDATES` | `script_event_candidates.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_IR` | `script_event_ir.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_DIAGNOSTICS` | `script_event_diagnostics.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_TRADES` | `script_event_in_game_trades.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_TILE_OVERRIDES` | `script_event_tile_overrides.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_BOULDER_TARGETS` | `script_event_boulder_targets.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_OBJECT_VISIBILITY` | `script_event_object_visibility.json` |
+| `POKEMON_EXTRACTOR_SCRIPT_EVENT_CONDITIONAL_DIALOGUE` | `script_event_conditional_dialogue.json` |
 
-Renderable tiles for one map:
+`SOURCE_DATE_EPOCH` controls the recorded schema/run epoch. If unset, the
+source submodule commit timestamp is used. The run ID is a SHA-256 identity
+derived from schema inputs, exact extractor/source revisions, the epoch, and
+the cataloged source-tree hash; wall-clock time is never used.
+
+### Installed command-line entry points
+
+The project is installable with `python3 -m pip install .` and exposes:
+
+- `pokemon-gameboy-extract`;
+- `pokemon-gameboy-catalogue-graphics`; and
+- `pokemon-gameboy-render-audio`.
+
+Installed commands treat the current directory as the checkout/workspace root.
+Set `POKEMON_EXTRACTOR_WORKSPACE` to point them at a different checkout. Normal
+`POKEMON_EXTRACTOR_*` output overrides still take precedence.
+
+## Relational database
+
+Consumers should enable SQLite foreign-key enforcement when opening the file:
 
 ```sql
-SELECT t.*, ti.image_path
-FROM tiles t
-JOIN tile_images ti ON ti.id = t.tile_image_id
-WHERE t.map_id = ?
-ORDER BY t.y, t.x, t.id;
+PRAGMA foreign_keys = ON;
 ```
 
-Trainer party data for an NPC:
+### Schema and release identity
+
+- `schema_metadata` declares `pokemon-gameboy-extractor`, its schema version,
+  minimum reader version, and deterministic application epoch.
+- `game_releases` has distinct Red and Blue rows with build defines.
+- `extraction_runs` records the canonical run ID, revisions, epoch, portable
+  source root, source-tree hash, file count, and byte count.
+- `extraction_run_releases` links the run to both releases.
+- `source_files` catalogs submodule source files using repository-relative
+  paths, SHA-256, size, and a format-neutral file type.
+- `extracted_entities` and `entity_provenance` link rows that expose direct or
+  JSON source paths to exact cataloged files.
+- `extracted_tables` and `table_provenance` cover every generated table with
+  its conservative upstream source set, including derived rows that do not
+  carry a single exact source path.
+
+Always feature-detect using `schema_metadata`, not a guessed table count:
 
 ```sql
-SELECT
-  o.name AS npc_name,
-  tc.display_name,
-  tp.party_index,
-  tpp.slot_index,
-  tpp.pokemon_name,
-  tpp.level
-FROM objects o
-JOIN trainer_classes tc ON tc.constant_name = o.trainer_class
-JOIN trainer_parties tp
-  ON tp.trainer_class_id = tc.id
- AND tp.party_index = o.trainer_party_index
-JOIN trainer_party_pokemon tpp ON tpp.trainer_party_id = tp.id
-WHERE o.name = ?
-ORDER BY tpp.slot_index;
+SELECT schema_name, schema_version, minimum_reader_version
+FROM schema_metadata;
 ```
 
-Trainer sight metadata for a map:
+Example provenance lookup:
 
 ```sql
-SELECT header_index, event_flag, sight_range, battle_text_label,
-       end_battle_text_label, after_battle_text_label
-FROM trainer_headers
-WHERE map_name = ?
-ORDER BY header_index;
+SELECT ep.entity_table, ep.entity_key, ep.source_path,
+       ep.source_column, ep.relationship
+FROM entity_provenance AS ep
+WHERE ep.entity_table = 'dialogue_text'
+ORDER BY ep.entity_key, ep.source_path;
 ```
 
-Generated script candidates for a source map:
+### Maps, tiles, and objects
+
+The map model includes `maps`, `tilesets`, `map_connections`, `blocksets`,
+`tileset_tiles`, `collision_tiles`, `tiles_raw`, `overworld_map_positions`,
+`tile_images`, and `tiles`.
+
+Red/Blue graphics have three spatial layers:
+
+1. a planar source tile is 8×8 pixels;
+2. a rendered map square is a 2×2 group of source tiles (16×16 pixels); and
+3. a map block is a 4×4 group of source tiles (32×32 pixels).
+
+`.blk` maps contain block indices. The extractor retains the raw block layer
+and expands it into final squares. `tiles.local_x/local_y` preserve source map
+space; stitched coordinates place the connected overworld maps in one global
+space. Use local coordinates for source events and global coordinates for an
+overworld view.
+
+Connections are normalized in `map_connections` with numeric map foreign keys,
+direction, and block offset. The convenience connection columns on `maps` also
+contain numeric map IDs. All 24 tileset constants are present; aliases point to
+their physical source through `tilesets.source_tileset_id`.
+
+Object/runtime tables include `objects`, `warps`, `warp_events`,
+`hidden_items`, `hidden_coins`, `hidden_objects`, `missable_objects`,
+`map_music`, `map_scripts`, `npc_movement_data`, `coordinate_triggers`,
+`event_flags`, and `spin_tiles`. Hidden-object rows resolve to map IDs; the two
+global Good Rod encounter rows are intentionally not map-specific.
+
+Every source warp has a `warp_sources` row and a map foreign key. Fixed
+destinations expose `destination_map_id` and destination coordinates. The
+source engine's `LAST_MAP` sentinel is preserved as
+`destination_kind = 'last-map'` with a null destination map: it is runtime
+state, not a static map relationship, and the extractor does not invent one.
+
+### Species, evolutions, moves, and encounters
+
+`pokemon` contains the 151 Pokédex species. Evolution is a one-to-many
+relationship in `pokemon_evolutions`:
 
 ```sql
-SELECT trigger_type, trigger_label, script_label, confidence, candidate_json
-FROM script_event_candidates
-WHERE map_name = ?
-ORDER BY trigger_type, trigger_label, script_label;
+SELECT source.name, evolution.method, evolution.level,
+       item.name AS item_name, target.name AS target_name
+FROM pokemon_evolutions AS evolution
+JOIN pokemon AS source ON source.id = evolution.source_pokemon_id
+JOIN pokemon AS target ON target.id = evolution.target_pokemon_id
+LEFT JOIN items AS item ON item.id = evolution.item_id
+WHERE source.name = 'EEVEE'
+ORDER BY evolution.source_order;
 ```
 
-## Map Parsing And Coordinate Model
+The old scalar evolution columns remain as a compatibility hint containing
+only the first source relationship. New consumers must use
+`pokemon_evolutions`, especially for branching species.
 
-The map pipeline reads:
+`moves` contains exactly IDs 1 through 165 and retains the source constant in
+`constant_name`. `pokemon_learnset`, `pokemon_tmhm`, item TM/HM references,
+Pokémon default moves, and audio move relationships are validated against that
+complete key set. Default moves use integer `default_move_*_id` foreign keys;
+the corresponding source constants remain available in compatibility
+`default_move_*_name` columns and in ordered form through
+`pokemon_default_moves`.
 
-- `constants/map_constants.asm`: map IDs and block dimensions
-- `data/maps/headers/*.asm`: map headers, tilesets, and connection macros
-- `maps/*.blk`: source map block references
-- `gfx/blocksets/*.bst`: block definitions
-- `gfx/tilesets/*.png`: tileset graphics
-- `data/tilesets/collision.asm`: source collision block/tile IDs
+`wild_encounters` uses one-based `slot_index`. Grass and water groups are
+materialized separately for `version = 'red'` and `version = 'blue'`, with ten
+complete slots per populated map/type/release group. Shared fishing data uses
+`version = 'both'`. Query the version explicitly:
 
-`export_map.py` generates missing `*.2bpp` tileset files from PNGs with
-`rgbgfx`.
-
-Pokemon Red/Blue map graphics are layered:
-
-1. A source tileset tile is 8x8 pixels.
-2. One in-game square is 16x16 pixels, or a 2x2 source-tile group.
-3. A blockset block is 32x32 pixels, or a 4x4 source-tile group.
-4. A `.blk` map file stores block indices.
-
-The extractor stores both intermediate and final renderable data:
-
-- `blocksets`: one 4x4 source-tile block per row
-- `tileset_tiles`: decoded 8x8 source tile bytes
-- `tiles_raw`: raw map block references before final expansion
-- `tile_images`: generated/deduplicated 16x16 PNGs
-- `tiles`: final renderable 16x16 squares with coordinates and `tile_image_id`
-
-### Coordinates
-
-The extractor keeps two coordinate models:
-
-- Local coordinates are the original map-space coordinates used by Red/Blue
-  object events, trainer sight ranges, coordinate triggers, and many scripts.
-- Global coordinates stitch overworld maps together for easier inspection and
-  downstream rendering.
-
-Interior maps generally have `x/y == local_x/local_y`. Overworld maps are
-offset by `overworld_map_positions`.
-
-Use local coordinates for source-script behavior and global coordinates for
-rendering the stitched overworld.
-
-### Map Connections
-
-Red/Blue map headers use the `connection` macro:
-
-```asm
-connection north, Route1, ROUTE_1, 0
-connection south, Route21, ROUTE_21, 0
+```sql
+SELECT slot_index, pokemon_name, level
+FROM wild_encounters
+WHERE map_id = ? AND encounter_type = 'grass' AND version = 'red'
+ORDER BY slot_index;
 ```
 
-The final numeric argument is measured in blocks, not 16x16 squares:
+Related gameplay tables include `items`, `trainer_classes`, `trainer_parties`,
+`trainer_party_pokemon`, `trainer_headers`, `dialogue_text`, and
+`text_pointers`.
 
-- north/south connections use it as an x-axis offset
-- east/west connections use it as a y-axis offset
-- one block is 2x2 in-game squares, or 32x32 pixels
+### Neutral script data
 
-The extractor stores these rows in `map_connections` and uses them when
-calculating overworld offsets.
+`script_event_ir_blocks` inventories source blocks and detected references.
+`script_event_candidates` represents recognized behavior with neutral trigger,
+condition, and action JSON. The JSON remains convenient transport data, while
+`script_event_candidate_actions`, `script_event_candidate_conditions`,
+`script_event_candidate_references`, and `script_event_ir_references` provide
+normalized, queryable projections with map foreign keys. Companion relationship
+tables cover trades, tile overrides, boulder targets, object visibility, and
+conditional dialogue. Map-facing script, movement, trigger, text-pointer,
+trainer-header, candidate, IR, and diagnostic rows all resolve through
+`maps.id` rather than relying on spelling-compatible names.
 
-## Script Candidate Model
+Diagnostics have three statuses:
 
-`export_script_candidates.py` does not try to turn all Game Boy assembly into a
-runtime. It recognizes source-backed behavior patterns and emits a neutral
-action vocabulary for downstream tools.
+- `generated`: a neutral candidate/relationship was emitted;
+- `covered`: another exported table or an explicitly identified runtime system
+  owns the behavior; and
+- `unsupported`: source behavior was detected but is not yet represented.
 
-Generated candidate trigger types:
+Unsupported is intentionally visible; consumers should not silently substitute
+an unrelated dialogue or guessed behavior.
 
-- `npc_click`
-- `coord`
-- `map_script`
+The generic hook in `runtime_profiles.py` deep-copies neutral records before
+applying an explicitly supplied profile. CaptureQuest compatibility is isolated
+in `adapters/capturequest.py` and is never imported by the canonical pipeline.
+A downstream migration can opt in without changing the neutral source:
 
-Diagnostics statuses:
+```python
+from adapters.capturequest import PROFILE
+from runtime_profiles import apply_candidate_profile, apply_diagnostic_profile
 
-- `generated`: behavior emitted as a neutral candidate
-- `covered`: behavior intentionally owned by downstream runtime systems, or
-  exported through another table such as trainer headers/parties
-- `unsupported`: source behavior detected but not yet represented
+capturequest_candidates = apply_candidate_profile(neutral_candidates, PROFILE)
+capturequest_diagnostics = apply_diagnostic_profile(neutral_diagnostics, PROFILE)
+```
 
-Use diagnostics to decide whether new adapters are needed. Do not silently
-fallback to a wrong dialogue label or a hand-authored guess when source
-behavior is unsupported.
+With the repository checkout as the working directory, add `export_scripts` to
+`PYTHONPATH` before using those imports. New projects should define their own
+duck-typed profile or consume the neutral vocabulary directly.
 
-Runtime integration notes:
+## Graphics catalog and PNG output
 
-- Trainer sight range is exported as `trainer_headers.sight_range`.
-- Trainer NPCs link through `objects.trainer_class` and
-  `objects.trainer_party_index`.
-- `spin_tiles` is source-backed forced-movement data.
-- `missable_objects` resolves `HS_*` hide/show constants to map/object rows.
-- Standard trainer battles are runtime-covered through `trainer_headers`,
-  `trainer_parties`, and `trainer_party_pokemon`, not generated script JSON.
-- Multi-system mechanics such as Day Care, Seafoam boulder/current behavior,
-  Name Rater, and full battle/party/storage mechanics should remain runtime
-  systems, with diagnostics marking source coverage.
+The graphics exporter walks every file under `pokemon-game-data/gfx`, then
+populates:
 
-## Offline Viewer
+- `graphic_formats` and `graphic_categories`;
+- `graphic_palettes` and ordered `graphic_palette_colors`;
+- `graphic_assets` for every source plus each generated image;
+- `graphic_source_links` for same-stem authored previews; and
+- `graphic_derivations` for raw-planar-to-PNG transformations.
 
-The Phaser viewer is static/offline. It reads generated JSON/assets directly
-through Vite.
+Every `.1bpp` and `.2bpp` stream is decoded. When an authored same-stem PNG
+provides dimensions, it also helps preserve sheet layout; otherwise the
+exporter uses a deterministic eight-tile-wide fallback. The catalog records
+dimensions, pixel mode, tile count, layout, palette, hashes, sizes, and the
+metadata basis. Validation re-encodes decoded images to prove byte-for-byte raw
+tile fidelity and compares applicable authored companions visually.
 
-`export_viewer_data.py` writes:
+Source PNGs and non-planar graphic formats remain directly addressable through
+repository-relative catalog rows. They are not needlessly transcoded or copied.
 
-- `pokemon-phaser/public/viewer-data/tile-images.json`
-- `pokemon-phaser/public/viewer-data/tiles/{map_id}.json`
-- `pokemon-phaser/public/viewer-data/map-info/{map_id}.json`
-- `pokemon-phaser/public/viewer-data/items.json`
-- `pokemon-phaser/public/viewer-data/npcs.json`
-- `pokemon-phaser/public/viewer-data/warps.json`
-- copied tile PNGs under `pokemon-phaser/public/viewer-assets/tile_images`
-- copied sprite PNGs under `pokemon-phaser/public/viewer-assets/sprites`
+## Audio catalog and rendering
 
-Run it from the root:
+`audio_manifest.json` has `schemaVersion: 2` and two declared output formats:
+
+- FLAC (`masterPath`) as the lossless master; and
+- Ogg Vorbis (`path`) as the distribution/browser form.
+
+It contains 45 music entries, 161 SFX/base-cry entries, 151 canonical species
+cry views, all 190 internal cry slots (including distinct glitch slots), 248 map
+music relationships, and all 165 move-sound relationships. The database
+normalizes this as `audio_assets`, `audio_channels`, `audio_asset_sources`,
+`map_music_assets`, `move_audio_assets`, and `pokemon_cry_assets`.
+
+Render the complete catalog:
+
+```bash
+npm run render:audio -- --build-gbs --kind all --out-dir build/audio
+```
+
+Or generate and validate the database, manifests, graphics, viewer, and all
+rendered audio as one staged release:
+
+```bash
+npm run generate:complete
+```
+
+`--kind` may be repeated and accepts `music`, `sfx`, `base-cries`, `cries`,
+`moves`, or `all`. `--constant` and `--move-id` render selected entries;
+`--limit` is useful for smoke tests. Music and effect capture lengths are
+controlled independently with `--music-seconds` and `--effect-seconds`.
+
+Species/internal cries and moves are derived assets. Their source pitch and
+tempo/length modifiers are applied while building the per-asset GBS player, so
+they cannot be faithfully rendered from a generic external `--gbs` file. Use
+`--build-gbs` for them.
+
+The renderer validates non-silent stereo 16-bit PCM, trims trailing silence
+from non-music effects, writes both formats with deterministic FFmpeg settings,
+and records hashes/duration/sample metadata in
+`audio-render-manifest.json`. Looping music is captured for the selected
+duration and tagged with a loop spanning that capture window; source loop labels
+and the `source-runtime-capture` mode remain in the source manifest. This is
+loop-aware capture metadata, not a claim that assembly loop labels map to an
+exact PCM sample without emulation.
+
+The audio output directory is itself staged and renamed. A failed render keeps
+the previous complete bundle.
+
+## Viewer
+
+The offline Phaser viewer reads generated files under
+`pokemon-phaser/public`. Run it with:
 
 ```bash
 npm run viewer
 ```
 
-Or from the viewer directory:
-
-```bash
-cd pokemon-phaser
-npm run dev
-```
-
-Build it:
+Build its static bundle with:
 
 ```bash
 npm run viewer:build
 ```
 
-If viewer data is missing, rerun `npm run generate`.
+The viewer is deliberately downstream of the reusable database and manifests;
+its layout is not part of the relational schema contract.
 
-## Validation
+## Validation and reproducibility
 
-Pipeline validation:
+Run focused/unit/integration tests:
+
+```bash
+npm test
+```
+
+Use `npm run test:python` or `npm run test:viewer` for one side only.
+
+Run a complete staged database/metadata/graphics/viewer release:
 
 ```bash
 npm run export
-sqlite3 pokemon.db ".tables"
-sqlite3 pokemon.db "SELECT COUNT(*) FROM tiles"
-sqlite3 pokemon.db "SELECT status, COUNT(*) FROM script_event_candidate_diagnostics GROUP BY status"
 ```
 
-Focused Python validation:
+Useful independent checks:
 
 ```bash
-python3 -m py_compile export_scripts/<script>.py
+sqlite3 pokemon.db 'PRAGMA integrity_check;'
+sqlite3 pokemon.db 'PRAGMA foreign_key_check;'
+sqlite3 pokemon.db 'SELECT schema_name, schema_version FROM schema_metadata;'
+npm run viewer:build
 ```
 
-Viewer data validation:
+The repository's full local CI equivalent runs Python/viewer tests, the viewer
+build, and a moderate-or-higher dependency audit:
 
 ```bash
-python3 export_scripts/export_viewer_data.py
-cd pokemon-phaser && npm run build
+npm run ci
 ```
 
-## Maintenance Roadmap
+GitHub Actions also compiles/tests Python 3.10 and 3.14, builds an installable
+wheel, type-checks/builds the viewer, and audits its locked dependencies.
 
+The central release gate verifies:
 
-### Keep Script Candidate Coverage Auditable
+- required tables and exact source-baseline cardinalities;
+- all move keys and dependent references;
+- complete release-specific encounter slot groups;
+- resolved encounter and hidden-object maps;
+- zero SQLite foreign-key violations and no host-specific database paths;
+- complete audio relationships/source paths;
+- complete graphics coverage, hashes, and round trips; and
+- canonical release/run/source/entity provenance.
 
-`script_event_candidate_diagnostics` is the main guard against silent script
-coverage regressions. Future adapters should:
+Deterministic exporters sort inputs and serialize stable JSON/PNG/audio output.
+For reproducible run identity across environments, pin both Git revisions and
+set the same `SOURCE_DATE_EPOCH`. Tool versions used for rendered audio are
+recorded in its render manifest; use the same RGBDS, `gbsplay`, and FFmpeg
+versions when byte-identical media is required.
 
-- mark generated behavior as `generated`
-- mark intentionally runtime-owned behavior as `covered`
-- leave genuinely unsupported behavior as `unsupported`
-- include enough JSON detail for downstream importers to understand what source
-  concept was detected
+## Legal boundary
 
-
-### Lower Priority Ideas
-
-- Batch large database inserts consistently.
-- Add optional progress bars for long-running loops.
-- Improve error recovery so one malformed source block can be reported without
-  hiding later validation failures.
-- Consider stable JSON schemas for generated script candidate files once the
-  neutral action vocabulary settles.
+The root MIT license covers the repository's original extractor code to the
+extent its contributors can license it. It does not relicense the Pokémon
+source material or generated content. See
+[DATA_AND_ASSET_NOTICE.md](DATA_AND_ASSET_NOTICE.md) for redistribution and
+third-party ownership cautions.

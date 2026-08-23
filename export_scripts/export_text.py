@@ -17,6 +17,7 @@ import re
 import sqlite3
 
 from config import DB_PATH, GLOBAL_TEXT_DIR, MAP_OBJECTS_DIR, SCRIPTS_DIR, TEXT_DIR
+from map_references import CanonicalMapResolver
 from text_tokens import normalize_game_text_tokens
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
@@ -47,11 +48,13 @@ def create_tables(conn):
     CREATE TABLE text_pointers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         text_constant TEXT NOT NULL,
         local_label TEXT NOT NULL,
         dialogue_label TEXT,
         pointer_index INTEGER DEFAULT 0,
-        is_trainer INTEGER DEFAULT 0
+        is_trainer INTEGER DEFAULT 0,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -60,13 +63,15 @@ def create_tables(conn):
     CREATE TABLE trainer_headers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         header_label TEXT NOT NULL,
         header_index INTEGER NOT NULL,
         event_flag TEXT,
         sight_range INTEGER,
         battle_text_label TEXT,
         end_battle_text_label TEXT,
-        after_battle_text_label TEXT
+        after_battle_text_label TEXT,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -348,7 +353,9 @@ def collect_all_text_far_from_scripts():
 
 def main():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     cursor = create_tables(conn)
+    map_resolver = CanonicalMapResolver.from_connection(conn)
 
     # =========================================================================
     # Phase 1: Extract all dialogue strings from text/*.asm files
@@ -399,6 +406,7 @@ def main():
 
     for script_file in sorted(SCRIPTS_DIR.glob("*.asm")):
         map_name = script_file.stem
+        map_id = map_resolver.resolve(map_name)
         text_pointers, text_far_refs, trainer_headers = parse_script_file(script_file)
 
         # Insert text pointers
@@ -414,9 +422,18 @@ def main():
 
             cursor.execute(
                 """INSERT INTO text_pointers 
-                   (map_name, text_constant, local_label, dialogue_label, pointer_index, is_trainer) 
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (map_name, text_constant, local_label, dialogue_label, idx, is_trainer),
+                   (map_name, map_id, text_constant, local_label, dialogue_label,
+                    pointer_index, is_trainer)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    map_name,
+                    map_id,
+                    text_constant,
+                    local_label,
+                    dialogue_label,
+                    idx,
+                    is_trainer,
+                ),
             )
             total_pointers += 1
 
@@ -429,11 +446,12 @@ def main():
 
             cursor.execute(
                 """INSERT INTO trainer_headers 
-                   (map_name, header_label, header_index, event_flag, sight_range,
+                   (map_name, map_id, header_label, header_index, event_flag, sight_range,
                     battle_text_label, end_battle_text_label, after_battle_text_label)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     th["map_name"],
+                    map_id,
                     th["header_label"],
                     th["header_index"],
                     th["event_flag"],

@@ -3,7 +3,7 @@
 Update Map Coordinates
 
 This script updates the coordinates of overworld maps to be relative to Pallet Town.
-It starts with Pallet Town (map_id 1) at coordinates (0,0) and recursively updates
+It starts with Pallet Town (map_id 0) at coordinates (0,0) and recursively updates
 connected maps based on their map connections.
 
 Coordinate System:
@@ -34,6 +34,12 @@ from config import DB_PATH
 
 PALLET_TOWN_MAP_ID = 0
 BLOCK_SIZE = 2  # Each block is 2x2 tiles
+OPPOSITE_DIRECTION = {
+    "north": "south",
+    "south": "north",
+    "east": "west",
+    "west": "east",
+}
 
 
 def get_map_dimensions(cursor, map_id):
@@ -106,13 +112,6 @@ def get_map_id_by_name(cursor, map_name):
 
 def get_connection_details(cursor, from_map_id, to_map_id):
     """Get connection details between two maps"""
-    # Get map names
-    from_map_name = get_map_name(cursor, from_map_id)
-    to_map_name = get_map_name(cursor, to_map_id)
-
-    if not from_map_name or not to_map_name:
-        return None, None
-
     # Check for direct connection
     cursor.execute(
         """
@@ -120,7 +119,7 @@ def get_connection_details(cursor, from_map_id, to_map_id):
         FROM map_connections
         WHERE from_map_id = ? AND to_map_id = ?
         """,
-        (from_map_name, to_map_name),
+        (from_map_id, to_map_id),
     )
     result = cursor.fetchone()
 
@@ -134,21 +133,13 @@ def get_connection_details(cursor, from_map_id, to_map_id):
         FROM map_connections
         WHERE from_map_id = ? AND to_map_id = ?
         """,
-        (to_map_name, from_map_name),
+        (to_map_id, from_map_id),
     )
     result = cursor.fetchone()
 
     if result:
         # Reverse the direction
-        direction = result[0]
-        if direction == "north":
-            return "south", result[1]
-        elif direction == "south":
-            return "north", result[1]
-        elif direction == "east":
-            return "west", result[1]
-        elif direction == "west":
-            return "east", result[1]
+        return OPPOSITE_DIRECTION[result[0]], result[1]
 
     return None, None
 
@@ -212,8 +203,7 @@ def process_map_connections(conn):
     if not update_tiles:
         print("tiles table does not exist yet; writing overworld_map_positions metadata only")
 
-    # Get all map names
-    map_names = get_all_map_names(cursor)
+    overworld_map_ids = set(get_all_map_names(cursor))
 
     processed_maps = set()
     map_queue = [(PALLET_TOWN_MAP_ID, 0, 0)]  # (map_id, x_offset, y_offset)
@@ -250,48 +240,41 @@ def process_map_connections(conn):
         # Mark this map as processed
         processed_maps.add(current_map_id)
 
-        # Find all connections from this map
+        # Outgoing connections already describe the connected map relative to
+        # the current map.
         cursor.execute(
             """
             SELECT to_map_id, direction, offset
             FROM map_connections
             WHERE from_map_id = ?
             """,
-            (map_name,),
+            (current_map_id,),
         )
         outgoing_connections = cursor.fetchall()
 
-        # Find all connections to this map
+        # Incoming source directions describe the current map relative to the
+        # neighbour, so reverse them before calculating the neighbour offset.
         cursor.execute(
             """
             SELECT from_map_id, direction, offset
             FROM map_connections
             WHERE to_map_id = ?
             """,
-            (map_name,),
+            (current_map_id,),
         )
-        incoming_connections = cursor.fetchall()
+        incoming_connections = [
+            (connected_map_id, OPPOSITE_DIRECTION[direction], offset)
+            for connected_map_id, direction, offset in cursor.fetchall()
+        ]
 
         # Process all connections
         for connections in [outgoing_connections, incoming_connections]:
-            for connected_map_name, direction, offset in connections:
-                # Get the map ID for the connected map
-                connected_map_id = get_map_id_by_name(cursor, connected_map_name)
-
-                if not connected_map_id or connected_map_id in processed_maps:
+            for connected_map_id, direction, offset in connections:
+                if (
+                    connected_map_id not in overworld_map_ids
+                    or connected_map_id in processed_maps
+                ):
                     continue
-
-                # Calculate new offsets
-                if connected_map_name == map_name:
-                    # This is a reverse connection
-                    if direction == "north":
-                        direction = "south"
-                    elif direction == "south":
-                        direction = "north"
-                    elif direction == "east":
-                        direction = "west"
-                    elif direction == "west":
-                        direction = "east"
 
                 x_offset, y_offset = calculate_map_offset(
                     cursor, current_map_id, connected_map_id, direction, offset

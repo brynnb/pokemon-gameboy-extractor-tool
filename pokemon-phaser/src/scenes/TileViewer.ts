@@ -183,7 +183,12 @@ export class TileViewer extends Scene {
     this.events.once("warpClicked", async (warp: any) => {
       console.log("Warp clicked:", warp);
 
-      if (warp && warp.destination_map_id) {
+      if (
+        warp &&
+        warp.destination_kind === "fixed" &&
+        warp.destination_map_id !== null &&
+        warp.destination_map_id !== undefined
+      ) {
         try {
           // Get the map name for the destination
           const mapInfo = await this.mapDataService.fetchMapInfo(

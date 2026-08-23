@@ -40,7 +40,7 @@ def create_tables(conn):
     CREATE TABLE hidden_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_constant TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         FOREIGN KEY (map_id) REFERENCES maps (id)
@@ -51,7 +51,7 @@ def create_tables(conn):
     CREATE TABLE hidden_coins (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_constant TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         FOREIGN KEY (map_id) REFERENCES maps (id)
@@ -62,7 +62,7 @@ def create_tables(conn):
     CREATE TABLE hidden_objects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_constant TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         item_or_direction TEXT,
@@ -78,7 +78,7 @@ def create_tables(conn):
         hs_index INTEGER NOT NULL,
         hs_constant TEXT NOT NULL UNIQUE,
         map_constant TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
         object_constant TEXT NOT NULL,
         object_index INTEGER,
         object_name TEXT,
@@ -94,7 +94,7 @@ def create_tables(conn):
     CREATE TABLE map_music (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_constant TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
         music_constant TEXT NOT NULL,
         FOREIGN KEY (map_id) REFERENCES maps (id)
     )
@@ -108,6 +108,13 @@ def load_map_ids(cursor):
     """Load map name -> ID mapping from the maps table."""
     cursor.execute("SELECT id, name FROM maps")
     return {name: id for id, name in cursor.fetchall()}
+
+
+def resolve_map_id(map_ids, map_constant, source_name):
+    """Resolve a source map constant or fail instead of emitting a dangling row."""
+    if map_constant not in map_ids:
+        raise ValueError(f"Unknown map constant in {source_name}: {map_constant}")
+    return map_ids[map_constant]
 
 
 def upper_snake_to_camel(value):
@@ -220,6 +227,8 @@ def parse_missable_objects(cursor, map_ids):
     missables = []
     for hs_index, (hs_constant, row) in enumerate(zip(hs_constants, hide_show_rows)):
         map_constant = row["map_constant"]
+        # Keep this parser usable with a partial mapping (for targeted consumers/tests).
+        # The generated table's NOT NULL/FK constraints reject unresolved rows in main().
         map_id = map_ids.get(map_constant)
         map_name = upper_snake_to_camel(map_constant)
         object_constant = row["object_constant"]
@@ -257,7 +266,7 @@ def parse_hidden_items(map_ids):
                 map_const = match.group(1)
                 x = int(match.group(2))
                 y = int(match.group(3))
-                map_id = map_ids.get(map_const)
+                map_id = resolve_map_id(map_ids, map_const, "hidden_item_coords.asm")
                 items.append((map_const, map_id, x, y))
 
     return items
@@ -276,22 +285,60 @@ def parse_hidden_coins(map_ids):
                 map_const = match.group(1)
                 x = int(match.group(2))
                 y = int(match.group(3))
-                map_id = map_ids.get(map_const)
+                map_id = resolve_map_id(map_ids, map_const, "hidden_coins.asm")
                 coins.append((map_const, map_id, x, y))
 
     return coins
 
 
-def parse_hidden_objects(map_ids):
+def parse_hidden_object_map_labels(content):
+    """Pair HiddenObjectMaps constants with their corresponding pointer labels."""
+    map_constants = []
+    pointer_labels = []
+    section = None
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if line == "HiddenObjectMaps:":
+            section = "maps"
+            continue
+        if line == "HiddenObjectPointers:":
+            section = "pointers"
+            continue
+        if section == "pointers" and line.startswith("MACRO "):
+            break
+
+        if section == "maps":
+            match = re.fullmatch(r"db\s+([A-Z0-9_]+)(?:\s*;.*)?", line)
+            if match:
+                map_constants.append(match.group(1))
+            elif re.fullmatch(r"db\s+-1(?:\s*;.*)?", line):
+                section = None
+        elif section == "pointers":
+            match = re.fullmatch(r"dw\s+(\w+)HiddenObjects(?:\s*;.*)?", line)
+            if match:
+                pointer_labels.append(match.group(1))
+
+    if not map_constants or not pointer_labels:
+        raise ValueError("hidden_objects.asm is missing its map or pointer table")
+    if len(map_constants) != len(pointer_labels):
+        raise ValueError(
+            "hidden_objects.asm map/pointer table length mismatch: "
+            f"{len(map_constants)} maps, {len(pointer_labels)} pointers"
+        )
+    if len(set(pointer_labels)) != len(pointer_labels):
+        raise ValueError("hidden_objects.asm contains duplicate pointer labels")
+
+    return dict(zip(pointer_labels, map_constants))
+
+
+def parse_hidden_objects_content(content, map_ids):
     """
-    Parse hidden_objects.asm for hidden interactable objects.
+    Parse hidden interactable objects from hidden_objects.asm source text.
     These include PCs, bookcases, gym statues, posters, etc.
     """
     objects = []
-    file_path = EVENTS_DIR / "hidden_objects.asm"
-
-    with open(file_path, "r") as f:
-        content = f.read()
+    map_constants_by_label = parse_hidden_object_map_labels(content)
 
     # Find all hidden object blocks per map
     # Format:
@@ -300,7 +347,10 @@ def parse_hidden_objects(map_ids):
     #     hidden_text_predef  x, y, TextPredefName, RoutineName
     #     db -1 ; end
 
-    current_map = None
+    current_map_label = None
+    current_map_constant = None
+    current_map_id = None
+    seen_map_labels = set()
 
     for line in content.split("\n"):
         stripped = line.strip()
@@ -309,9 +359,14 @@ def parse_hidden_objects(map_ids):
         label_match = re.match(r"^(\w+)HiddenObjects:", stripped)
         if label_match:
             label = label_match.group(1)
-            # Try to derive map constant from the label
-            # These labels don't always match map constants exactly
-            current_map = label
+            if label not in map_constants_by_label:
+                raise ValueError(f"Hidden-object block is absent from pointer table: {label}")
+            current_map_label = label
+            current_map_constant = map_constants_by_label[label]
+            current_map_id = resolve_map_id(
+                map_ids, current_map_constant, "hidden_objects.asm"
+            )
+            seen_map_labels.add(label)
             continue
 
         # Match hidden_object macro
@@ -319,7 +374,7 @@ def parse_hidden_objects(map_ids):
             r"hidden_object\s+(\d+),\s+(\d+),\s+(\w+),\s+(\w+)",
             stripped
         )
-        if obj_match and current_map:
+        if obj_match and current_map_label:
             x = int(obj_match.group(1))
             y = int(obj_match.group(2))
             item_dir = obj_match.group(3)
@@ -343,7 +398,9 @@ def parse_hidden_objects(map_ids):
                 obj_type = "cable_club"
 
             objects.append({
-                "map_label": current_map,
+                "map_label": current_map_label,
+                "map_constant": current_map_constant,
+                "map_id": current_map_id,
                 "x": x,
                 "y": y,
                 "item_or_direction": item_dir,
@@ -357,14 +414,16 @@ def parse_hidden_objects(map_ids):
             r"hidden_text_predef\s+(\d+),\s+(\d+),\s+(\w+),\s+(\w+)",
             stripped
         )
-        if text_match and current_map:
+        if text_match and current_map_label:
             x = int(text_match.group(1))
             y = int(text_match.group(2))
             text_predef = text_match.group(3)
             routine = text_match.group(4)
 
             objects.append({
-                "map_label": current_map,
+                "map_label": current_map_label,
+                "map_constant": current_map_constant,
+                "map_id": current_map_id,
                 "x": x,
                 "y": y,
                 "item_or_direction": text_predef,
@@ -375,9 +434,25 @@ def parse_hidden_objects(map_ids):
 
         # End of block
         if stripped == "db -1 ; end":
-            current_map = None
+            current_map_label = None
+            current_map_constant = None
+            current_map_id = None
+
+    missing_blocks = set(map_constants_by_label) - seen_map_labels
+    if missing_blocks:
+        raise ValueError(
+            "Hidden-object pointer table references missing blocks: "
+            + ", ".join(sorted(missing_blocks))
+        )
 
     return objects
+
+
+def parse_hidden_objects(map_ids):
+    """Read and parse hidden_objects.asm with authoritative map relationships."""
+    file_path = EVENTS_DIR / "hidden_objects.asm"
+    with open(file_path, "r") as f:
+        return parse_hidden_objects_content(f.read(), map_ids)
 
 
 def parse_map_music(map_ids):
@@ -396,7 +471,7 @@ def parse_map_music(map_ids):
             if match:
                 music_const = match.group(1)
                 map_const = match.group(2)
-                map_id = map_ids.get(map_const)
+                map_id = resolve_map_id(map_ids, map_const, "songs.asm")
                 music_data.append((map_const, map_id, music_const))
 
     return music_data
@@ -441,7 +516,7 @@ def main():
             """INSERT INTO hidden_objects 
                (map_constant, map_id, x, y, item_or_direction, routine, object_type)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (obj["map_label"], None, obj["x"], obj["y"],
+            (obj["map_constant"], obj["map_id"], obj["x"], obj["y"],
              obj["item_or_direction"], obj["routine"], obj["object_type"]),
         )
     print(f"  Extracted {len(hidden_objects)} hidden objects")

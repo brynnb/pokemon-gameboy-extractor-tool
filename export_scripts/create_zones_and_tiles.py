@@ -23,6 +23,7 @@ import re
 from config import (
     BATCH_SIZE,
     DB_PATH,
+    TILE_IMAGE_OUTPUT_DIR,
     TILESET_IMAGE_ALIAS_TARGETS,
     TILE_IMAGES_DIR,
     remap_tileset_for_blockset,
@@ -98,11 +99,11 @@ def extract_tile_images(conn):
     cursor = conn.cursor()
 
     # Create directory for tile images if it doesn't exist
-    os.makedirs(TILE_IMAGES_DIR, exist_ok=True)
+    TILE_IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Clean up old files
     print("Cleaning up old tile images...")
-    old_files = list(Path(TILE_IMAGES_DIR).glob("*.png"))
+    old_files = list(TILE_IMAGE_OUTPUT_DIR.glob("*.png"))
     for old_file in old_files:
         try:
             os.remove(old_file)
@@ -196,7 +197,7 @@ def extract_tile_images(conn):
                 else:
                     # Save the image with a sequential number
                     image_path = f"{TILE_IMAGES_DIR}/tile_{unique_image_count}.png"
-                    img.save(image_path)
+                    img.save(TILE_IMAGE_OUTPUT_DIR / f"tile_{unique_image_count}.png")
 
                     # Insert the new image record
                     cursor.execute(

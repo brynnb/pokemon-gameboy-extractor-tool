@@ -1,190 +1,172 @@
-# Pokemon Game Boy Extractor Tool
+# Pokémon Game Boy Extractor Tool
 
-This repo extracts Pokemon Red/Blue data from the `pokered` disassembly into a
-local SQLite database (`pokemon.db`) and companion JSON/assets. The output is
-intended for games, tools, editors, and importers that need canonical Gen 1 map,
-tile, object, trainer, encounter, item, move, Pokemon, dialogue, and script
-source data.
+This repository turns the source data in the
+[`pret/pokered`](https://github.com/pret/pokered) disassembly into reusable,
+project-neutral artifacts:
 
-The extractor is project-neutral. It does not know about any downstream game
-repo and does not copy files into one. It does not include a Pokemon ROM image;
-it reads source/data files from the `pokemon-game-data` submodule.
+- a relational SQLite database with foreign keys, release metadata, and source
+  provenance;
+- portable JSON manifests for script/event and audio data;
+- a complete graphics catalog plus deterministic PNG decodes of Game Boy
+  1bpp/2bpp sources;
+- optional lossless FLAC masters and Ogg Vorbis distribution audio rendered
+  through the original Red/Blue audio engine; and
+- static data/assets for the included offline map viewer.
 
-![Pokemon overworld viewer demo](https://github.com/user-attachments/assets/e4602729-29bb-4ee4-94f6-446c90dd2a89)
+The extractor does not include a Pokémon ROM and does not copy artifacts into
+any downstream game. The canonical output is neutral: application-specific
+IDs, persistence, networking, UI, battle behavior, and script execution remain
+the consumer's responsibility.
 
-## What It Produces
+![Pokémon overworld viewer demo](https://github.com/user-attachments/assets/e4602729-29bb-4ee4-94f6-446c90dd2a89)
 
-`npm run generate` produces:
-
-- `pokemon.db`: generated SQLite source-data artifact.
-- `script_event_candidates.json`: neutral generated script-event candidates.
-- `script_event_conditional_dialogue.json`: neutral conditional dialogue rows.
-- `script_event_in_game_trades.json`: source in-game trade definitions.
-- `script_event_ir.json` and `script_event_diagnostics.json`: script inventory
-  and coverage diagnostics.
-- `audio_manifest.json`: source music, SFX, map music, move sound, and Pokemon
-  cry metadata with stable browser asset paths.
-- `export_scripts/tile_images/*.png`: generated 16x16 tile PNGs.
-- `pokemon-phaser/public/viewer-data/**`: generated static JSON for the viewer.
-- `pokemon-phaser/public/viewer-assets/**`: copied tile and sprite PNGs for the
-  viewer.
-
-Tracked source-derived reference files include:
-
-- `script_event_boulder_targets.json`
-- `script_event_tile_overrides.json`
-
-These outputs preserve source constants and source behavior where possible.
-Downstream projects are responsible for mapping them to app-specific IDs,
-runtime state, persistence, UI, networking, battle mechanics, and script
-execution.
-
-## Setup
+## Quick start
 
 ```bash
-git clone https://github.com/brynnb/pokemon-gameboy-extractor-tool.git --recurse-submodules
+git clone --recurse-submodules https://github.com/brynnb/pokemon-gameboy-extractor-tool.git
 cd pokemon-gameboy-extractor-tool
-npm install
-```
-
-`npm install` initializes the `pokemon-game-data` submodule and installs the
-nested offline viewer dependencies.
-
-If the submodule is missing:
-
-```bash
-git submodule update --init --recursive
-```
-
-Install RGBDS so `rgbgfx` is available for tileset conversion and `rgbasm`,
-`rgblink`, and `rgbfix` are available for source-audio rendering:
-
-```bash
-# macOS
-brew install rgbds
-
-# Ubuntu/Debian
-sudo apt-get install rgbds
-```
-
-## Generate Data
-
-For a fresh setup and full rebuild:
-
-```bash
+npm run setup
 npm run generate
 ```
 
-This command:
-
-1. updates the `pokemon-game-data` submodule
-2. creates or reuses a Python virtual environment
-3. installs Python dependencies from `requirements.txt`
-4. rebuilds `pokemon.db`
-5. emits generated script JSON artifacts
-6. writes offline viewer JSON/assets
-7. validates required generated script tables
-
-To run just the canonical extractor pipeline:
+`npm run setup` initializes the `pokemon-game-data` submodule and installs the
+locked offline-viewer dependencies. `npm run generate` prepares Python
+dependencies and runs the validated database/metadata/graphics/viewer pipeline.
+To run the pipeline with an already prepared Python environment:
 
 ```bash
 npm run export
 ```
 
-That runs `export_scripts/reprocess.py`.
+Extraction requires Python 3.10 or newer, Pillow, and RGBDS (`rgbgfx`). The npm
+workflows require Node.js 20.19 or newer and npm 10 or newer. Install RGBDS
+with Homebrew (`brew install rgbds`) or your operating system's package
+manager. See [DOCUMENTATION.md](DOCUMENTATION.md#requirements) for the complete
+tool matrix, including optional audio requirements.
 
-## Render Audio
+## Outputs
 
-`audio_manifest.json` describes source audio constants and their browser asset
-paths. To render actual OGG files from the original audio engine, install
-`gbsplay` and `oggenc`, then run:
+The default extraction publishes these artifacts only after every exporter and
+validation check succeeds:
+
+| Output | Contents |
+| --- | --- |
+| `pokemon.db` | Relational Red/Blue data, release/run metadata, source-file and entity provenance, graphics/audio catalogs. |
+| `script_event_*.json` | Neutral script IR, candidates, diagnostics, trades, conditional dialogue, visibility, tile, and boulder data. |
+| `audio_manifest.json` | Versioned music, SFX, map-music, move-sound, and all 190 internal cry-slot metadata. |
+| `build/graphics/decoded/**` | Deterministic PNG decodes for every supported source `.1bpp` and `.2bpp` asset. |
+| `export_scripts/tile_images/**` | Deduplicated 16×16 map tile PNGs. |
+| `pokemon-phaser/public/viewer-{data,assets}/**` | Static bundle consumed by the offline viewer. |
+
+Database paths are portable POSIX paths. Graphics source rows point back to
+the repository/submodule; derived graphics rows use paths relative to the
+graphics output root. Audio paths beginning with `/sound/` are logical web
+paths, which the renderer safely materializes below its selected output root.
+
+The pinned Red/Blue source baseline is validated for, among other invariants,
+151 species, all move IDs 1–165, all 72 evolution relationships, release-aware
+grass/water slot groups, 198 map-linked hidden objects, 561 normalized audio
+assets, and a complete source/derived graphics catalog. Exact checks live in
+`export_scripts/reprocess.py`, so incomplete releases are rejected rather than
+published.
+
+## Render audio
+
+Audio rendering is optional because it requires additional native tools and is
+substantially slower than metadata extraction. Install RGBDS, `gbsplay`, and
+FFmpeg. To generate and publish the database, manifests, graphics, viewer, and
+all audio as one validated release:
 
 ```bash
-npm run render:audio -- --build-rom --kind music --out-dir rendered-audio --seconds 90 --fade 3
-npm run render:audio -- --build-rom --kind sfx --out-dir rendered-audio --seconds 6 --fade 0
-npm run render:audio -- --build-rom --kind cries --out-dir rendered-audio --seconds 4 --fade 0
+npm run generate:complete
 ```
 
-`--kind cries` renders one OGG per Pokemon species using the source cry
-constant plus that species' original pitch and length modifiers. Use
-`--kind base-cries` only when you need the raw shared cry constants.
+To add or refresh audio directly from an existing `audio_manifest.json`:
 
-The `--build-rom` mode builds a tiny temporary Game Boy ROM for each requested
-constant using the source audio engine, renders it with `gbsplay`, and encodes
-the result as OGG. The output root is intentionally caller-controlled; this repo
-does not copy files into downstream projects.
+```bash
+npm run render:audio -- --build-gbs --kind all --out-dir build/audio
+```
 
-## World Viewer
+The renderer builds a source-derived GBS player per asset, captures the source
+engine through `gbsplay`, writes deterministic FLAC masters and Ogg Vorbis
+derivatives, and publishes an `audio-render-manifest.json` with hashes, sample
+metadata, source modifiers, and loop-capture metadata. Useful focused forms:
 
-The Phaser viewer inspects generated maps, tiles, items, NPCs, and warps from
-static JSON/assets.
+```bash
+npm run render:audio -- --build-gbs --kind music --out-dir build/audio
+npm run render:audio -- --build-gbs --kind sfx --kind base-cries --out-dir build/audio
+npm run render:audio -- --build-gbs --kind cries --kind moves --out-dir build/audio
+npm run render:audio -- --build-gbs --constant MUSIC_PALLET_TOWN --out-dir build/audio
+npm run render:audio -- --build-gbs --move-id 1 --out-dir build/audio
+```
 
-Run the viewer:
+`--build-rom` remains a deprecated command-line alias for `--build-gbs`; it
+does not produce or send a `.gb` ROM to the player.
+
+## Viewer
 
 ```bash
 npm run viewer
-```
-
-Build the viewer:
-
-```bash
 npm run viewer:build
 ```
 
-If viewer data is missing, rerun `npm run generate`.
-
-## Data Model Notes
-
-Pokemon Red/Blue stores maps as block grids:
-
-1. 8x8 source tiles are stored as Game Boy 2bpp graphics.
-2. One in-game square is 16x16 pixels, or a 2x2 tile group.
-3. Blocksets group source tiles into 4x4-tile blocks.
-4. `.blk` map files store block references.
-5. The extractor expands those references into final `tiles` rows and generated
-   `tile_images` PNGs.
-
-Overworld maps are stitched into global coordinates for inspection and
-downstream rendering. Local map coordinates are still preserved and should be
-used for source-script behavior such as trainer sight, coordinate triggers,
-object interaction, and warps.
-
-## More Documentation
-
-See `DOCUMENTATION.md` for the full pipeline, schema, map coordinate model,
-script candidate model, viewer data, validation, and maintenance roadmap.
-
-## Important Files
-
-- `export_scripts/reprocess.py`: canonical full pipeline.
-- `export_scripts/export_audio_manifest.py`: source audio metadata exporter.
-- `export_scripts/render_audio_assets.py`: source audio renderer.
-- `export_scripts/build_audio_rom.py`: temporary audio-only ROM builder.
-- `export_scripts/export_viewer_data.py`: static viewer JSON/asset exporter.
-- `export_scripts/*.py`: individual extractors.
-- `DOCUMENTATION.md`: full project documentation.
-- `pokemon-game-data/`: source data submodule.
-- `pokemon-phaser/`: offline Phaser viewer.
+The Phaser viewer is an inspection aid, not a game runtime. It displays the
+generated maps, tiles, objects, items, NPCs, and warps from static local data.
 
 ## Validation
 
-For pipeline changes:
-
 ```bash
-npm run export
-sqlite3 pokemon.db ".tables"
-sqlite3 pokemon.db "SELECT COUNT(*) FROM tiles"
+npm test
+npm run ci
+sqlite3 pokemon.db 'PRAGMA foreign_key_check;'
 ```
 
-For viewer changes:
+`npm test` runs the Python suite and viewer checks. `npm run ci` additionally
+builds and audits the locked viewer dependency tree. The complete extractor
+can still be exercised independently with `npm run export`.
+
+The pipeline also runs SQLite integrity/foreign-key checks, exact source
+coverage checks, portable-path checks, graphics round-trip/hash validation,
+audio relationship validation, and release/provenance validation before
+publishing.
+
+## Project-neutral core and adapters
+
+The default exporter contains no CaptureQuest runtime assumptions. Generic
+profile hooks live in `export_scripts/runtime_profiles.py`; the historical
+CaptureQuest mappings are isolated in the optional
+`export_scripts/adapters/capturequest.py` adapter. Consumers opt in explicitly,
+and the neutral artifacts remain the default.
+
+## Installable Python commands
+
+The checkout can also be installed as a Python package:
 
 ```bash
-python3 export_scripts/export_viewer_data.py
-cd pokemon-phaser && npm run build
+python3 -m pip install .
+pokemon-gameboy-extract
+pokemon-gameboy-catalogue-graphics
+pokemon-gameboy-render-audio --build-gbs --kind all
 ```
 
-For focused Python changes:
+Installed commands use the current directory as the checkout/workspace root.
+Set `POKEMON_EXTRACTOR_WORKSPACE` to select another checkout containing the
+`pokemon-game-data` source tree.
 
-```bash
-python3 -m py_compile export_scripts/<script>.py
-```
+## Documentation and migration
+
+- [DOCUMENTATION.md](DOCUMENTATION.md) — architecture, output layout, schema,
+  provenance, configuration, graphics/audio workflows, and validation.
+- [MIGRATING.md](MIGRATING.md) — consumer changes from the earlier unversioned
+  output.
+- [DATA_AND_ASSET_NOTICE.md](DATA_AND_ASSET_NOTICE.md) — the important legal
+  distinction between this extractor's code and third-party Pokémon material.
+
+## License and third-party material
+
+Original extractor code in this repository is offered under the
+[MIT License](LICENSE). That license does **not** grant rights to Pokémon game
+data, graphics, audio, text, trademarks, the `pret/pokered` submodule, or other
+third-party material. Generated artifacts can contain or describe that
+material. Read [DATA_AND_ASSET_NOTICE.md](DATA_AND_ASSET_NOTICE.md) before
+redistributing generated data or assets.

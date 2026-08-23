@@ -12,18 +12,21 @@ Creates tables:
   - wild_encounters: All wild Pokemon encounters (grass, water, fishing)
   - encounter_slots: Probability distribution for encounter slots
 """
-import os
 import re
 import sqlite3
+from collections import defaultdict
+from pathlib import Path
 
 from config import (
-    CONSTANTS_DIR,
     DB_PATH,
     MAP_CONSTANTS_FILE,
-    POKEDEX_CONSTANTS_FILE,
     WILD_DIR,
     WILD_MAPS_DIR,
 )
+
+
+RELEASES = ("red", "blue")
+WILD_DATA_POINTERS_FILE = WILD_DIR / "grass_water.asm"
 
 
 def create_tables(conn):
@@ -39,12 +42,17 @@ def create_tables(conn):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
         map_id INTEGER,
+        source_label TEXT,
         encounter_type TEXT NOT NULL,
         encounter_rate INTEGER NOT NULL DEFAULT 0,
         slot_index INTEGER NOT NULL,
         pokemon_name TEXT NOT NULL,
         level INTEGER NOT NULL,
         version TEXT DEFAULT 'both',
+        CHECK (encounter_type IN ('grass', 'water', 'super_rod', 'good_rod')),
+        CHECK (slot_index > 0),
+        CHECK (version IN ('red', 'blue', 'both')),
+        UNIQUE (map_name, encounter_type, version, slot_index),
         FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
@@ -69,104 +77,247 @@ def load_map_ids(cursor):
     return {name: id for id, name in cursor.fetchall()}
 
 
-def parse_wild_map_file(file_path):
+def load_map_constant_order(file_path=MAP_CONSTANTS_FILE):
+    """Return map constants in their source-defined numeric order.
+
+    ``WildDataPointers`` is an index-aligned table.  Its comments are helpful to
+    humans but are incomplete, so deriving map identity from comments or wild
+    data filenames is not reliable.
     """
-    Parse a data/wild/maps/*.asm file for grass and water encounters.
-    
-    Format:
-      MapNameWildMons:
-        def_grass_wildmons <encounter_rate>
-        db <level>, <POKEMON>
-        ... (10 entries)
-        end_grass_wildmons
-        
-        def_water_wildmons <encounter_rate>
-        db <level>, <POKEMON>
-        ... (10 entries)
-        end_water_wildmons
-    
-    Some maps have version-specific encounters (IF DEF(_RED) / IF DEF(_BLUE)).
-    Returns list of encounter dicts.
+    constants = []
+    pattern = re.compile(r"^\s*map_const\s+([A-Z][A-Z0-9_]*)\s*,")
+
+    with open(file_path, "r", encoding="utf-8") as source:
+        for line in source:
+            match = pattern.match(line)
+            if match:
+                constants.append(match.group(1))
+
+    if not constants:
+        raise ValueError(f"No map constants found in {file_path}")
+    if len(constants) != len(set(constants)):
+        raise ValueError(f"Duplicate map constants found in {file_path}")
+    return constants
+
+
+def load_wild_data_pointer_map(
+    pointer_file=WILD_DATA_POINTERS_FILE,
+    map_constants_file=MAP_CONSTANTS_FILE,
+):
+    """Return ``WildMons`` label -> canonical map constants.
+
+    The pointer and map-constant tables are both indexed by map ID.  Repeated
+    pointers are retained, which is required for shared data such as
+    ``SeaRoutesWildMons`` (Route 19 and Route 20).
     """
+    map_constants = load_map_constant_order(map_constants_file)
+    pointers = []
+    in_table = False
+
+    with open(pointer_file, "r", encoding="utf-8") as source:
+        for line in source:
+            code = line.split(";", 1)[0].strip()
+            if code == "WildDataPointers:":
+                in_table = True
+                continue
+            if not in_table:
+                continue
+            if code.startswith("assert_table_length"):
+                break
+
+            match = re.match(r"^dw\s+([A-Za-z_][A-Za-z0-9_]*)\b", code)
+            if match:
+                pointers.append(match.group(1))
+
+    if not in_table:
+        raise ValueError(f"WildDataPointers table not found in {pointer_file}")
+    if len(pointers) != len(map_constants):
+        raise ValueError(
+            "WildDataPointers/map constant length mismatch: "
+            f"{len(pointers)} pointers for {len(map_constants)} maps"
+        )
+
+    result = defaultdict(list)
+    for map_name, source_label in zip(map_constants, pointers):
+        result[source_label].append(map_name)
+    return dict(result)
+
+
+def parse_wild_map_definition(file_path):
+    """Parse one wild-data source and retain its assembly label."""
+    with open(file_path, "r", encoding="utf-8") as source:
+        content = source.read()
+
+    label_match = re.search(
+        r"^([A-Za-z_][A-Za-z0-9_]*WildMons):",
+        content,
+        flags=re.MULTILINE,
+    )
+    if not label_match:
+        raise ValueError(f"No WildMons label found in {file_path}")
+
+    lines = content.splitlines()
     encounters = []
+    encounters.extend(parse_encounter_section(lines, "grass", source=file_path))
+    encounters.extend(parse_encounter_section(lines, "water", source=file_path))
+    return label_match.group(1), encounters
 
-    with open(file_path, "r") as f:
-        content = f.read()
-        lines = content.split("\n")
 
-    # Extract map name from the label
-    map_label_match = re.search(r"(\w+)WildMons:", content)
-    if not map_label_match:
-        return encounters
-
-    # Parse grass encounters
-    grass_encounters = parse_encounter_section(lines, "grass")
-    encounters.extend(grass_encounters)
-
-    # Parse water encounters
-    water_encounters = parse_encounter_section(lines, "water")
-    encounters.extend(water_encounters)
-
+def parse_wild_map_file(file_path):
+    """Compatibility wrapper returning encounters without the source label."""
+    _source_label, encounters = parse_wild_map_definition(file_path)
     return encounters
 
 
-def parse_encounter_section(lines, encounter_type):
-    """Parse a grass or water encounter section from the file lines."""
-    encounters = []
+def _parse_rgbds_int(value):
+    """Parse the integer formats used by RGBDS assembly source."""
+    if value.startswith("$"):
+        return int(value[1:], 16)
+    if value.startswith("%"):
+        return int(value[1:], 2)
+    return int(value, 10)
+
+
+def _release_condition_matches(expression, release, source):
+    expression = re.sub(r"\s+", "", expression).upper()
+    expected = f"DEF(_{release.upper()})"
+    if expression == expected:
+        return True
+    if expression in {f"DEF(_{other.upper()})" for other in RELEASES}:
+        return False
+    if expression == f"!{expected}":
+        return False
+    if expression in {f"!DEF(_{other.upper()})" for other in RELEASES}:
+        return True
+    raise ValueError(f"Unsupported wild encounter condition {expression!r} in {source}")
+
+
+def _compile_section_for_release(section_lines, release, source):
+    """Evaluate RGBDS conditionals and return one release's encounter rows."""
+    entries = []
+    active = True
+    conditional_stack = []
+
+    for line_number, line in section_lines:
+        code = line.split(";", 1)[0].strip()
+        if not code:
+            continue
+
+        if_match = re.match(r"^IF\s+(.+)$", code, flags=re.IGNORECASE)
+        if if_match:
+            condition = _release_condition_matches(if_match.group(1), release, source)
+            frame = {
+                "parent_active": active,
+                "branch_taken": condition,
+            }
+            conditional_stack.append(frame)
+            active = active and condition
+            continue
+
+        elif_match = re.match(r"^ELIF\s+(.+)$", code, flags=re.IGNORECASE)
+        if elif_match:
+            if not conditional_stack:
+                raise ValueError(f"ELIF without IF at {source}:{line_number}")
+            frame = conditional_stack[-1]
+            condition = _release_condition_matches(elif_match.group(1), release, source)
+            active = frame["parent_active"] and not frame["branch_taken"] and condition
+            frame["branch_taken"] = frame["branch_taken"] or condition
+            continue
+
+        if code.upper() == "ELSE":
+            if not conditional_stack:
+                raise ValueError(f"ELSE without IF at {source}:{line_number}")
+            frame = conditional_stack[-1]
+            active = frame["parent_active"] and not frame["branch_taken"]
+            frame["branch_taken"] = True
+            continue
+
+        if code.upper() == "ENDC":
+            if not conditional_stack:
+                raise ValueError(f"ENDC without IF at {source}:{line_number}")
+            frame = conditional_stack.pop()
+            active = frame["parent_active"]
+            continue
+
+        if not active:
+            continue
+
+        entry_match = re.match(
+            r"^db\s+([$%]?[0-9A-Fa-f]+)\s*,\s*([A-Z][A-Z0-9_]*)\b",
+            code,
+        )
+        if entry_match:
+            entries.append(
+                (_parse_rgbds_int(entry_match.group(1)), entry_match.group(2))
+            )
+
+    if conditional_stack:
+        raise ValueError(f"Unclosed IF block in {source}")
+    return entries
+
+
+def parse_encounter_section(lines, encounter_type, source="<memory>"):
+    """Compile a grass/water section into explicit Red and Blue slot tables.
+
+    Common rows are emitted once for each release.  This makes each non-empty
+    ``(encounter_type, version)`` group a self-contained table with slots 1-10,
+    including when common rows occur on both sides of conditional blocks.
+    """
+    if encounter_type not in {"grass", "water"}:
+        raise ValueError(f"Unsupported encounter type: {encounter_type}")
+
     macro_start = f"def_{encounter_type}_wildmons"
     macro_end = f"end_{encounter_type}_wildmons"
+    section_start = None
+    encounter_rate = None
+    section_lines = []
 
-    in_section = False
-    encounter_rate = 0
-    slot_index = 0
-    current_version = "both"
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Check for section start
-        if macro_start in stripped:
-            rate_match = re.search(rf"{macro_start}\s+(\d+)", stripped)
-            if rate_match:
-                encounter_rate = int(rate_match.group(1))
-            in_section = True
-            slot_index = 0
-            current_version = "both"
+    for line_number, line in enumerate(lines, 1):
+        code = line.split(";", 1)[0].strip()
+        start_match = re.match(
+            rf"^{macro_start}\s+([$%]?[0-9A-Fa-f]+)\b",
+            code,
+        )
+        if start_match:
+            if section_start is not None:
+                raise ValueError(f"Duplicate {encounter_type} section in {source}")
+            section_start = line_number
+            encounter_rate = _parse_rgbds_int(start_match.group(1))
             continue
 
-        if macro_end in stripped:
-            in_section = False
+        if section_start is None:
             continue
+        if code == macro_end:
+            break
+        section_lines.append((line_number, line))
+    else:
+        if section_start is not None:
+            raise ValueError(f"Unclosed {encounter_type} section in {source}")
 
-        if not in_section:
-            continue
+    if section_start is None:
+        raise ValueError(f"Missing {encounter_type} section in {source}")
 
-        # Handle version-specific blocks
-        if "IF DEF(_RED)" in stripped:
-            current_version = "red"
-            continue
-        elif "IF DEF(_BLUE)" in stripped:
-            current_version = "blue"
-            continue
-        elif "ENDC" in stripped:
-            current_version = "both"
-            continue
+    encounters = []
+    for release in RELEASES:
+        release_entries = _compile_section_for_release(section_lines, release, source)
+        expected_count = 0 if encounter_rate == 0 else 10
+        if len(release_entries) != expected_count:
+            raise ValueError(
+                f"{source}: {encounter_type} table for {release} has "
+                f"{len(release_entries)} slots; expected {expected_count}"
+            )
 
-        # Parse encounter entry: db <level>, <POKEMON>
-        entry_match = re.match(r"\s*db\s+(\d+),\s+(\w+)", stripped)
-        if entry_match:
-            level = int(entry_match.group(1))
-            pokemon_name = entry_match.group(2)
-            slot_index += 1
-
-            encounters.append({
-                "encounter_type": encounter_type,
-                "encounter_rate": encounter_rate,
-                "slot_index": slot_index,
-                "pokemon_name": pokemon_name,
-                "level": level,
-                "version": current_version,
-            })
+        for slot_index, (level, pokemon_name) in enumerate(release_entries, 1):
+            encounters.append(
+                {
+                    "encounter_type": encounter_type,
+                    "encounter_rate": encounter_rate,
+                    "slot_index": slot_index,
+                    "pokemon_name": pokemon_name,
+                    "level": level,
+                    "version": release,
+                }
+            )
 
     return encounters
 
@@ -269,6 +420,135 @@ def convert_map_constant_to_name(constant):
     return constant
 
 
+def collect_wild_map_definitions(wild_maps_dir=WILD_MAPS_DIR):
+    """Load wild sources keyed by their assembly label, never their filename."""
+    definitions = {}
+    for wild_file in sorted(Path(wild_maps_dir).glob("*.asm")):
+        source_label, encounters = parse_wild_map_definition(wild_file)
+        if source_label in definitions:
+            raise ValueError(
+                f"Duplicate wild data label {source_label}: "
+                f"{definitions[source_label]['path']} and {wild_file}"
+            )
+        definitions[source_label] = {
+            "path": wild_file,
+            "encounters": encounters,
+        }
+    return definitions
+
+
+def export_grass_water_encounters(
+    cursor,
+    map_ids,
+    wild_maps_dir=WILD_MAPS_DIR,
+    pointer_file=WILD_DATA_POINTERS_FILE,
+    map_constants_file=MAP_CONSTANTS_FILE,
+):
+    """Insert canonical per-map, per-release grass/water slot tables."""
+    definitions = collect_wild_map_definitions(wild_maps_dir)
+    pointer_map = load_wild_data_pointer_map(pointer_file, map_constants_file)
+
+    missing_definitions = sorted(set(pointer_map) - set(definitions))
+    if missing_definitions:
+        raise ValueError(
+            "WildDataPointers references undefined labels: "
+            + ", ".join(missing_definitions)
+        )
+
+    unreferenced_definitions = sorted(set(definitions) - set(pointer_map))
+    if unreferenced_definitions:
+        raise ValueError(
+            "Wild map definitions are absent from WildDataPointers: "
+            + ", ".join(unreferenced_definitions)
+        )
+
+    inserted_count = 0
+    maps_with_encounters = set()
+    for source_label, map_names in pointer_map.items():
+        encounters = definitions[source_label]["encounters"]
+        if not encounters:
+            continue
+
+        for map_name in map_names:
+            map_id = map_ids.get(map_name)
+            if map_id is None:
+                raise ValueError(
+                    f"Wild encounter map {map_name} is missing from the maps table "
+                    f"(source {source_label})"
+                )
+            maps_with_encounters.add(map_name)
+
+            for encounter in encounters:
+                cursor.execute(
+                    """INSERT INTO wild_encounters
+                       (map_name, map_id, source_label, encounter_type,
+                        encounter_rate, slot_index, pokemon_name, level, version)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        map_name,
+                        map_id,
+                        source_label,
+                        encounter["encounter_type"],
+                        encounter["encounter_rate"],
+                        encounter["slot_index"],
+                        encounter["pokemon_name"],
+                        encounter["level"],
+                        encounter["version"],
+                    ),
+                )
+                inserted_count += 1
+
+    return inserted_count, len(maps_with_encounters)
+
+
+def validate_wild_encounters(cursor):
+    """Reject incomplete slots and broken canonical map relationships."""
+    invalid_groups = cursor.execute(
+        """
+        SELECT map_name, encounter_type, version,
+               COUNT(*) AS row_count,
+               COUNT(DISTINCT slot_index) AS distinct_slots,
+               MIN(slot_index) AS first_slot,
+               MAX(slot_index) AS last_slot
+        FROM wild_encounters
+        WHERE encounter_type IN ('grass', 'water')
+        GROUP BY map_name, encounter_type, version
+        HAVING row_count != 10
+            OR distinct_slots != 10
+            OR first_slot != 1
+            OR last_slot != 10
+        """
+    ).fetchall()
+    if invalid_groups:
+        raise ValueError(f"Incomplete grass/water encounter groups: {invalid_groups[:5]}")
+
+    invalid_releases = cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM wild_encounters
+        WHERE encounter_type IN ('grass', 'water')
+          AND version NOT IN ('red', 'blue')
+        """
+    ).fetchone()[0]
+    if invalid_releases:
+        raise ValueError(
+            f"Found {invalid_releases} grass/water rows without an explicit release"
+        )
+
+    broken_maps = cursor.execute(
+        """
+        SELECT e.map_name, e.map_id, e.source_label
+        FROM wild_encounters AS e
+        LEFT JOIN maps AS m ON m.id = e.map_id
+        WHERE e.map_name != 'GLOBAL'
+          AND (e.map_id IS NULL OR m.id IS NULL OR m.name != e.map_name)
+        LIMIT 5
+        """
+    ).fetchall()
+    if broken_maps:
+        raise ValueError(f"Broken wild encounter map relationships: {broken_maps}")
+
+
 def main():
     conn = sqlite3.connect(DB_PATH)
     cursor = create_tables(conn)
@@ -291,48 +571,10 @@ def main():
     # Phase 2: Grass and water encounters from map files
     # =========================================================================
     print("\nPhase 2: Extracting grass/water encounters...")
-    grass_water_count = 0
-    maps_with_encounters = 0
-
-    for wild_file in sorted(WILD_MAPS_DIR.glob("*.asm")):
-        if wild_file.name == "nothing.asm":
-            continue
-
-        encounters = parse_wild_map_file(wild_file)
-        if not encounters:
-            continue
-
-        # Derive map name from file name (e.g., Route1.asm -> ROUTE_1)
-        file_stem = wild_file.stem
-        # Convert CamelCase to UPPER_SNAKE_CASE
-        map_name_upper = re.sub(r"([a-z])([A-Z])", r"\1_\2", file_stem)
-        map_name_upper = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", map_name_upper)
-        map_name_upper = re.sub(r"([a-zA-Z])(\d)", r"\1_\2", map_name_upper)
-        map_name_upper = map_name_upper.upper()
-
-        map_id = map_ids.get(map_name_upper)
-
-        if encounters:
-            maps_with_encounters += 1
-
-        for enc in encounters:
-            cursor.execute(
-                """INSERT INTO wild_encounters 
-                   (map_name, map_id, encounter_type, encounter_rate, slot_index,
-                    pokemon_name, level, version)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    map_name_upper,
-                    map_id,
-                    enc["encounter_type"],
-                    enc["encounter_rate"],
-                    enc["slot_index"],
-                    enc["pokemon_name"],
-                    enc["level"],
-                    enc["version"],
-                ),
-            )
-            grass_water_count += 1
+    grass_water_count, maps_with_encounters = export_grass_water_encounters(
+        cursor,
+        map_ids,
+    )
 
     print(f"  Extracted {grass_water_count} grass/water encounters from {maps_with_encounters} maps")
 
@@ -345,6 +587,8 @@ def main():
 
     for map_const, encounters in super_rod_data.items():
         map_id = map_ids.get(map_const)
+        if map_id is None:
+            raise ValueError(f"Super Rod map {map_const} is missing from the maps table")
 
         for idx, (level, pokemon) in enumerate(encounters, 1):
             cursor.execute(
@@ -374,6 +618,9 @@ def main():
         )
 
     print(f"  Extracted {len(good_rod_data)} Good Rod encounters (global)")
+
+    validate_wild_encounters(cursor)
+    print("  Validated complete release slot tables and canonical map relationships")
 
     conn.commit()
 

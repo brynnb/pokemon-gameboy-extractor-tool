@@ -23,8 +23,10 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
-from config import DB_PATH, MAP_OBJECTS_DIR, SCRIPTS_DIR
+from config import DB_PATH, MAP_OBJECTS_DIR, PROJECT_ROOT, SCRIPTS_DIR
+from map_references import CanonicalMapResolver
 
 OBJECTS_DIR = MAP_OBJECTS_DIR
 
@@ -45,10 +47,12 @@ def create_tables(conn):
     CREATE TABLE map_scripts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         script_index INTEGER NOT NULL,
         script_label TEXT NOT NULL,
         script_constant TEXT NOT NULL,
-        raw_asm TEXT
+        raw_asm TEXT,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -57,8 +61,10 @@ def create_tables(conn):
     CREATE TABLE npc_movement_data (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         label TEXT NOT NULL,
-        movements TEXT NOT NULL
+        movements TEXT NOT NULL,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -67,11 +73,13 @@ def create_tables(conn):
     CREATE TABLE spin_tiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         source_label TEXT NOT NULL,
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         movement_label TEXT NOT NULL,
-        movements TEXT NOT NULL
+        movements TEXT NOT NULL,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -80,9 +88,11 @@ def create_tables(conn):
     CREATE TABLE event_flags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         flag_name TEXT NOT NULL,
         operation TEXT NOT NULL,
-        context_label TEXT
+        context_label TEXT,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -91,9 +101,11 @@ def create_tables(conn):
     CREATE TABLE coordinate_triggers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
+        map_id INTEGER NOT NULL,
         label TEXT NOT NULL,
         x INTEGER NOT NULL,
-        y INTEGER NOT NULL
+        y INTEGER NOT NULL,
+        FOREIGN KEY (map_id) REFERENCES maps (id)
     )
     """)
 
@@ -102,11 +114,25 @@ def create_tables(conn):
     CREATE TABLE warp_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         map_name TEXT NOT NULL,
-        map_id INTEGER,
+        map_id INTEGER NOT NULL,
+        source_warp_index INTEGER NOT NULL CHECK(source_warp_index >= 1),
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         dest_map TEXT NOT NULL,
-        dest_warp_index INTEGER NOT NULL
+        dest_kind TEXT NOT NULL CHECK(dest_kind IN ('fixed', 'last-map')),
+        dest_map_id INTEGER,
+        dest_warp_index INTEGER NOT NULL CHECK(dest_warp_index >= 0),
+        source_file TEXT NOT NULL,
+        UNIQUE(map_name, source_warp_index),
+        FOREIGN KEY (map_id) REFERENCES maps (id),
+        FOREIGN KEY (dest_map_id) REFERENCES maps (id),
+        CHECK(
+            (dest_kind = 'fixed' AND dest_map <> 'LAST_MAP'
+                AND dest_map_id IS NOT NULL)
+            OR
+            (dest_kind = 'last-map' AND dest_map = 'LAST_MAP'
+                AND dest_map_id IS NULL)
+        )
     )
     """)
 
@@ -425,7 +451,7 @@ def extract_raw_script_blocks(content, script_pointers):
     return blocks
 
 
-def parse_warp_events(file_path, map_ids):
+def parse_warp_events(file_path, map_resolver, project_root=PROJECT_ROOT):
     """
     Parse warp events from a data/maps/objects/*.asm file.
     Format: warp_event x, y, DEST_MAP, warp_index
@@ -445,36 +471,89 @@ def parse_warp_events(file_path, map_ids):
         return warps
 
     warp_pattern = r"warp_event\s+(\d+),\s+(\d+),\s+(\w+),\s+(\d+)"
-    for match in re.finditer(warp_pattern, warp_section.group(1)):
+    map_id = map_resolver.resolve(map_name)
+    source_file = Path(file_path).resolve().relative_to(
+        Path(project_root).resolve()
+    ).as_posix()
+    for source_warp_index, match in enumerate(
+        re.finditer(warp_pattern, warp_section.group(1)), start=1
+    ):
         x = int(match.group(1))
         y = int(match.group(2))
         dest_map = match.group(3)
         dest_warp = int(match.group(4))
 
-        # Convert CamelCase map name to UPPER_SNAKE_CASE for map_id lookup
-        map_name_upper = re.sub(r"([a-z])([A-Z])", r"\1_\2", map_name)
-        map_name_upper = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", map_name_upper)
-        map_name_upper = re.sub(r"([a-zA-Z])(\d)", r"\1_\2", map_name_upper)
-        map_name_upper = map_name_upper.upper()
-
-        map_id = map_ids.get(map_name_upper)
+        is_last_map = dest_map == "LAST_MAP"
 
         warps.append({
             "map_name": map_name,
             "map_id": map_id,
+            "source_warp_index": source_warp_index,
             "x": x,
             "y": y,
             "dest_map": dest_map,
+            "dest_kind": "last-map" if is_last_map else "fixed",
+            "dest_map_id": None if is_last_map else map_resolver.resolve(dest_map),
             "dest_warp_index": dest_warp,
+            "source_file": source_file,
         })
 
     return warps
 
 
+def validate_map_script_relationships(conn):
+    """Reject unresolved or dangling map relationships in script tables."""
+    required_map_tables = (
+        "map_scripts",
+        "npc_movement_data",
+        "spin_tiles",
+        "event_flags",
+        "coordinate_triggers",
+        "warp_events",
+    )
+    for table in required_map_tables:
+        unresolved = conn.execute(
+            f'SELECT COUNT(*) FROM "{table}" WHERE map_id IS NULL'
+        ).fetchone()[0]
+        if unresolved:
+            raise ValueError(f"{table} has {unresolved} unresolved source maps")
+    invalid_destinations = conn.execute(
+        """
+        SELECT COUNT(*) FROM warp_events
+        WHERE (dest_kind = 'fixed' AND dest_map_id IS NULL)
+           OR (dest_kind = 'last-map' AND dest_map_id IS NOT NULL)
+        """
+    ).fetchone()[0]
+    if invalid_destinations:
+        raise ValueError(
+            f"warp_events has {invalid_destinations} invalid destination relationships"
+        )
+    absolute_paths = conn.execute(
+        """
+        SELECT COUNT(*) FROM warp_events
+        WHERE source_file LIKE '/%'
+           OR source_file GLOB '[A-Za-z]:*'
+           OR instr(source_file, '\\') > 0
+        """
+    ).fetchone()[0]
+    if absolute_paths:
+        raise ValueError(f"warp_events has {absolute_paths} non-portable source paths")
+    errors = []
+    for table in required_map_tables:
+        errors.extend(conn.execute(f'PRAGMA foreign_key_check("{table}")').fetchall())
+    if errors:
+        raise ValueError(f"Map-script foreign-key violations: {errors[:10]}")
+    return {
+        table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        for table in required_map_tables
+    }
+
+
 def main():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     cursor = create_tables(conn)
-    map_ids = load_map_ids(cursor)
+    map_resolver = CanonicalMapResolver.from_connection(conn)
 
     total_scripts = 0
     total_movements = 0
@@ -490,6 +569,7 @@ def main():
 
     for script_file in sorted(SCRIPTS_DIR.glob("*.asm")):
         map_name = script_file.stem
+        map_id = map_resolver.resolve(map_name)
 
         with open(script_file, "r") as f:
             content = f.read()
@@ -503,9 +583,9 @@ def main():
             raw_asm = raw_blocks.get(label, "")
             cursor.execute(
                 """INSERT INTO map_scripts 
-                   (map_name, script_index, script_label, script_constant, raw_asm)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (map_name, idx, label, constant, raw_asm),
+                   (map_name, map_id, script_index, script_label, script_constant, raw_asm)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (map_name, map_id, idx, label, constant, raw_asm),
             )
             total_scripts += 1
 
@@ -513,8 +593,9 @@ def main():
         movements = parse_movement_data(content, map_name)
         for mv in movements:
             cursor.execute(
-                "INSERT INTO npc_movement_data (map_name, label, movements) VALUES (?, ?, ?)",
-                (mv["map_name"], mv["label"], mv["movements"]),
+                """INSERT INTO npc_movement_data
+                   (map_name, map_id, label, movements) VALUES (?, ?, ?, ?)""",
+                (mv["map_name"], map_id, mv["label"], mv["movements"]),
             )
             total_movements += 1
 
@@ -523,10 +604,11 @@ def main():
         for tile in spin_tiles:
             cursor.execute(
                 """INSERT INTO spin_tiles
-                   (map_name, source_label, x, y, movement_label, movements)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (map_name, map_id, source_label, x, y, movement_label, movements)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     tile["map_name"],
+                    map_id,
                     tile["source_label"],
                     tile["x"],
                     tile["y"],
@@ -541,9 +623,15 @@ def main():
         for fl in flags:
             cursor.execute(
                 """INSERT INTO event_flags 
-                   (map_name, flag_name, operation, context_label)
-                   VALUES (?, ?, ?, ?)""",
-                (fl["map_name"], fl["flag_name"], fl["operation"], fl["context_label"]),
+                   (map_name, map_id, flag_name, operation, context_label)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    fl["map_name"],
+                    map_id,
+                    fl["flag_name"],
+                    fl["operation"],
+                    fl["context_label"],
+                ),
             )
             total_flags += 1
 
@@ -552,8 +640,8 @@ def main():
         for ct in coords:
             cursor.execute(
                 """INSERT INTO coordinate_triggers 
-                   (map_name, label, x, y) VALUES (?, ?, ?, ?)""",
-                (ct["map_name"], ct["label"], ct["x"], ct["y"]),
+                   (map_name, map_id, label, x, y) VALUES (?, ?, ?, ?, ?)""",
+                (ct["map_name"], map_id, ct["label"], ct["x"], ct["y"]),
             )
             total_coords += 1
 
@@ -569,19 +657,24 @@ def main():
     print("\nPhase 2: Parsing warp events...")
 
     for obj_file in sorted(OBJECTS_DIR.glob("*.asm")):
-        warps = parse_warp_events(obj_file, map_ids)
+        warps = parse_warp_events(obj_file, map_resolver)
         for w in warps:
             cursor.execute(
                 """INSERT INTO warp_events 
-                   (map_name, map_id, x, y, dest_map, dest_warp_index)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (w["map_name"], w["map_id"], w["x"], w["y"],
-                 w["dest_map"], w["dest_warp_index"]),
+                   (map_name, map_id, source_warp_index, x, y, dest_map,
+                    dest_kind, dest_map_id, dest_warp_index, source_file)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    w["map_name"], w["map_id"], w["source_warp_index"],
+                    w["x"], w["y"], w["dest_map"], w["dest_kind"],
+                    w["dest_map_id"], w["dest_warp_index"], w["source_file"],
+                ),
             )
             total_warps += 1
 
     print(f"  Warp events: {total_warps}")
 
+    validate_map_script_relationships(conn)
     conn.commit()
 
     # =========================================================================

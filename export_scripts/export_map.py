@@ -40,6 +40,8 @@ from config import (
     MAP_CONSTANTS_FILE,
     MAP_HEADERS_DIR,
     MAPS_DIR,
+    PROJECT_ROOT,
+    TILESET_BLOCKSET_ALIASES,
     TILESET_CONSTANTS_FILE,
     TILESETS_DIR,
 )
@@ -73,7 +75,7 @@ def create_database():
         """
     CREATE TABLE IF NOT EXISTS maps (
         id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE,
         width INTEGER NOT NULL,
         height INTEGER NOT NULL,
         tileset_id INTEGER,
@@ -82,7 +84,8 @@ def create_database():
         south_connection INTEGER,
         west_connection INTEGER,
         east_connection INTEGER,
-        is_overworld INTEGER NOT NULL DEFAULT 0
+        is_overworld INTEGER NOT NULL DEFAULT 0 CHECK (is_overworld IN (0, 1)),
+        FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
     """
     )
@@ -92,9 +95,11 @@ def create_database():
         """
     CREATE TABLE IF NOT EXISTS tilesets (
         id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE,
+        source_tileset_id INTEGER,
         blockset_path TEXT,
-        tileset_path TEXT
+        tileset_path TEXT,
+        FOREIGN KEY (source_tileset_id) REFERENCES tilesets (id)
     )
     """
     )
@@ -107,6 +112,7 @@ def create_database():
         tileset_id INTEGER NOT NULL,
         block_index INTEGER NOT NULL,
         block_data BLOB NOT NULL,
+        UNIQUE (tileset_id, block_index),
         FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
     """
@@ -121,6 +127,7 @@ def create_database():
         to_map_id INTEGER NOT NULL,
         direction TEXT NOT NULL,
         offset INTEGER,
+        UNIQUE (from_map_id, to_map_id, direction),
         FOREIGN KEY (from_map_id) REFERENCES maps (id),
         FOREIGN KEY (to_map_id) REFERENCES maps (id)
     )
@@ -135,6 +142,7 @@ def create_database():
         tileset_id INTEGER NOT NULL,
         tile_index INTEGER NOT NULL,
         tile_data BLOB NOT NULL,
+        UNIQUE (tileset_id, tile_index),
         FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
     """
@@ -148,6 +156,7 @@ def create_database():
         tileset_id INTEGER NOT NULL,
         tileset_name TEXT NOT NULL,
         tile_id INTEGER NOT NULL,
+        UNIQUE (tileset_id, tile_id),
         FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
     """
@@ -163,7 +172,8 @@ def create_database():
         y INTEGER NOT NULL,
         block_index INTEGER NOT NULL,
         tileset_id INTEGER NOT NULL,
-        is_overworld INTEGER NOT NULL DEFAULT 0,
+        is_overworld INTEGER NOT NULL DEFAULT 0 CHECK (is_overworld IN (0, 1)),
+        UNIQUE (map_id, x, y),
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (tileset_id) REFERENCES tilesets (id)
     )
@@ -172,6 +182,13 @@ def create_database():
 
     conn.commit()
     return conn
+
+
+def portable_source_path(path):
+    """Return a stable repository-relative path for a source asset."""
+    if path is None:
+        return None
+    return os.path.relpath(os.fspath(path), PROJECT_ROOT).replace(os.sep, "/")
 
 
 def load_map_constants():
@@ -704,22 +721,45 @@ def main():
     map_data = extract_map_data()
     tileset_data = extract_tileset_data()
 
-    # Insert tileset data
-    tileset_count = 0
+    # Materialize every source tileset constant, including aliases whose
+    # blockset/graphics are owned by another tileset. Maps and collision rows
+    # reference the source IDs, so omitting alias rows breaks referential
+    # integrity even though rendering can remap them at lookup time.
+    for tileset_name, tileset_info in sorted(
+        tileset_constants.items(), key=lambda row: row[1]["id"]
+    ):
+        tileset_id = tileset_info["id"]
+        cursor.execute(
+            """
+            INSERT INTO tilesets (id, name, source_tileset_id, blockset_path, tileset_path)
+            VALUES (?, ?, ?, NULL, NULL)
+            """,
+            (
+                tileset_id,
+                tileset_name,
+                TILESET_BLOCKSET_ALIASES.get(tileset_id),
+            ),
+        )
+
+    # Attach physical blockset/graphics data to the owning tileset rows.
+    physical_tileset_count = 0
     for tileset_name, tileset_info in tileset_data.items():
         tileset_id = find_tileset_id(tileset_name, tileset_constants)
 
         if tileset_id is not None:
             cursor.execute(
-                "INSERT INTO tilesets (id, name, blockset_path, tileset_path) VALUES (?, ?, ?, ?)",
+                """
+                UPDATE tilesets
+                SET blockset_path = ?, tileset_path = ?
+                WHERE id = ?
+                """,
                 (
+                    portable_source_path(tileset_info["blockset_path"]),
+                    portable_source_path(tileset_info["tileset_png_path"]),
                     tileset_id,
-                    tileset_name,
-                    tileset_info["blockset_path"],
-                    tileset_info["tileset_png_path"],
                 ),
             )
-            tileset_count += 1
+            physical_tileset_count += 1
 
             # Parse and insert blockset data
             blockset_path = tileset_info["blockset_path"]
@@ -749,36 +789,19 @@ def main():
         else:
             print(f"Warning: No tileset ID found for tileset {tileset_name}")
 
-    print(f"Inserted {tileset_count} tilesets into database")
+    print(
+        f"Inserted {len(tileset_constants)} tileset identities "
+        f"({physical_tileset_count} with physical assets) into database"
+    )
 
-    # First pass: Process all maps to identify overworld maps and their dimensions
-    overworld_maps = {}
-    for map_name, map_info in map_constants.items():
-        # Find the corresponding map header
-        header_info = None
-        for header_name, header_data in map_headers.items():
-            if header_data["map_id"] == map_name:
-                header_info = header_data
-                break
-
-        if not header_info:
-            header_info = {}
-
-        tileset_name = header_info.get("tileset")
-        tileset_id = None
-        if tileset_name:
-            tileset_id = find_tileset_id(tileset_name, tileset_constants)
-
-            # Check if this is an overworld map (tileset_id = 0)
-            is_overworld = tileset_id == 0
-
-            if is_overworld:
-                # Store information about this overworld map
-                overworld_maps[map_name] = {
-                    "width": map_info["width"],
-                    "height": map_info["height"],
-                    "id": map_info["id"],
-                }
+    # World maps are defined by the source connection graph, not by one
+    # particular tileset. Route 23 and Indigo Plateau use PLATEAU graphics but
+    # still belong to the connected overworld.
+    overworld_map_constants = {
+        connection[key]
+        for connection in map_connections
+        for key in ("from_map_id", "to_map_id")
+    }
 
     # Insert map data
     map_count = 0
@@ -809,11 +832,12 @@ def main():
         if blk_name:
             blk_data = map_data[blk_name]["blk_data"]
 
-        # Check if this is an overworld map (tileset_id = 0)
-        is_overworld = tileset_id == 0
+        is_overworld = map_name in overworld_map_constants
+        uses_overworld_tileset = tileset_id == 0
 
-        # For overworld maps, invert the y-coordinates by reversing the rows in the blk_data
-        if is_overworld and blk_data:
+        # Preserve the existing OVERWORLD-tileset rendering transform. World
+        # membership and tileset choice are separate source concepts.
+        if uses_overworld_tileset and blk_data:
             width = map_info["width"]
             height = map_info["height"]
 
@@ -856,7 +880,7 @@ def main():
                 map_info["height"],
                 tileset_id,
                 blk_data,
-                1 if tileset_id == 0 else 0,
+                1 if is_overworld else 0,
             ),
         )
         map_count += 1
@@ -900,8 +924,7 @@ def main():
         if tileset_id is None:
             continue
 
-        # Check if this is an overworld map
-        is_overworld = tileset_id == 0
+        is_overworld = map_name in overworld_map_constants
 
         # Find the corresponding .blk file
         blk_name = find_matching_blk_file(map_name, map_data)
@@ -974,14 +997,21 @@ def main():
     # Insert map connections
     connection_count = 0
     for connection in map_connections:
+        from_map = map_constants.get(connection["from_map_id"])
+        to_map = map_constants.get(connection["to_map_id"])
+        if from_map is None or to_map is None:
+            raise ValueError(
+                "Unresolved map connection: "
+                f"{connection['from_map_id']} -> {connection['to_map_id']}"
+            )
         cursor.execute(
             """
             INSERT INTO map_connections (from_map_id, to_map_id, direction, offset)
             VALUES (?, ?, ?, ?)
             """,
             (
-                connection["from_map_id"],
-                connection["to_map_id"],
+                from_map["id"],
+                to_map["id"],
                 connection["direction"],
                 connection["offset"],
             ),

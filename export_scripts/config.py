@@ -1,11 +1,31 @@
 """Shared paths and constants for extractor scripts."""
 
+import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "pokemon.db"
+_CHECKOUT_ROOT = Path(__file__).resolve().parent.parent
+_configured_project_root = os.environ.get("POKEMON_EXTRACTOR_PROJECT_ROOT")
+PROJECT_ROOT = Path(_configured_project_root or _CHECKOUT_ROOT).expanduser()
+if not PROJECT_ROOT.is_absolute():
+    PROJECT_ROOT = Path.cwd() / PROJECT_ROOT
+PROJECT_ROOT = PROJECT_ROOT.resolve()
 
-GAME_DATA_ROOT = PROJECT_ROOT / "pokemon-game-data"
+
+def configured_path(environment_name, default):
+    """Resolve an optional path override relative to the project root."""
+    configured = os.environ.get(environment_name)
+    path = Path(configured) if configured else Path(default)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+DB_PATH = configured_path("POKEMON_EXTRACTOR_DB", PROJECT_ROOT / "pokemon.db")
+
+GAME_DATA_ROOT = configured_path(
+    "POKEMON_EXTRACTOR_GAME_DATA_ROOT",
+    PROJECT_ROOT / "pokemon-game-data",
+)
 DATA_DIR = GAME_DATA_ROOT / "data"
 CONSTANTS_DIR = GAME_DATA_ROOT / "constants"
 GFX_DIR = GAME_DATA_ROOT / "gfx"
@@ -38,11 +58,23 @@ SPRITES_DIR = GFX_DIR / "sprites"
 TILESET_DATA_DIR = DATA_DIR / "tilesets"
 
 TILE_IMAGES_DIR = "tile_images"
-TILE_IMAGE_OUTPUT_DIR = PROJECT_ROOT / "export_scripts" / TILE_IMAGES_DIR
+TILE_IMAGE_OUTPUT_DIR = configured_path(
+    "POKEMON_EXTRACTOR_TILE_IMAGE_DIR",
+    PROJECT_ROOT / "export_scripts" / TILE_IMAGES_DIR,
+)
 
-VIEWER_PUBLIC_DIR = PROJECT_ROOT / "pokemon-phaser" / "public"
-VIEWER_DATA_DIR = VIEWER_PUBLIC_DIR / "viewer-data"
-VIEWER_ASSET_DIR = VIEWER_PUBLIC_DIR / "viewer-assets"
+VIEWER_PUBLIC_DIR = configured_path(
+    "POKEMON_EXTRACTOR_VIEWER_PUBLIC_DIR",
+    PROJECT_ROOT / "pokemon-phaser" / "public",
+)
+VIEWER_DATA_DIR = configured_path(
+    "POKEMON_EXTRACTOR_VIEWER_DATA_DIR",
+    VIEWER_PUBLIC_DIR / "viewer-data",
+)
+VIEWER_ASSET_DIR = configured_path(
+    "POKEMON_EXTRACTOR_VIEWER_ASSET_DIR",
+    VIEWER_PUBLIC_DIR / "viewer-assets",
+)
 VIEWER_TILE_ASSET_DIR = VIEWER_ASSET_DIR / "tile_images"
 VIEWER_SPRITE_ASSET_DIR = VIEWER_ASSET_DIR / "sprites"
 
@@ -63,17 +95,50 @@ COLLISION_TILE_IDS_FILE = TILESET_DATA_DIR / "collision_tile_ids.asm"
 TRADES_FILE = EVENTS_DIR / "trades.asm"
 CINNABAR_LAB_ENGINE_FILE = GAME_DATA_ROOT / "engine" / "events" / "cinnabar_lab.asm"
 
-SCRIPT_EVENT_CANDIDATES_PATH = PROJECT_ROOT / "script_event_candidates.json"
-SCRIPT_EVENT_IR_PATH = PROJECT_ROOT / "script_event_ir.json"
-SCRIPT_EVENT_DIAGNOSTICS_PATH = PROJECT_ROOT / "script_event_diagnostics.json"
-SCRIPT_EVENT_TRADES_PATH = PROJECT_ROOT / "script_event_in_game_trades.json"
-SCRIPT_EVENT_TILE_OVERRIDES_PATH = PROJECT_ROOT / "script_event_tile_overrides.json"
-SCRIPT_EVENT_BOULDER_TARGETS_PATH = PROJECT_ROOT / "script_event_boulder_targets.json"
-SCRIPT_EVENT_OBJECT_VISIBILITY_PATH = PROJECT_ROOT / "script_event_object_visibility.json"
-SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH = (
-    PROJECT_ROOT / "script_event_conditional_dialogue.json"
+SCRIPT_EVENT_CANDIDATES_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_CANDIDATES",
+    PROJECT_ROOT / "script_event_candidates.json",
 )
-AUDIO_MANIFEST_PATH = PROJECT_ROOT / "audio_manifest.json"
+SCRIPT_EVENT_IR_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_IR",
+    PROJECT_ROOT / "script_event_ir.json",
+)
+SCRIPT_EVENT_DIAGNOSTICS_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_DIAGNOSTICS",
+    PROJECT_ROOT / "script_event_diagnostics.json",
+)
+SCRIPT_EVENT_TRADES_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_TRADES",
+    PROJECT_ROOT / "script_event_in_game_trades.json",
+)
+SCRIPT_EVENT_TILE_OVERRIDES_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_TILE_OVERRIDES",
+    PROJECT_ROOT / "script_event_tile_overrides.json",
+)
+SCRIPT_EVENT_BOULDER_TARGETS_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_BOULDER_TARGETS",
+    PROJECT_ROOT / "script_event_boulder_targets.json",
+)
+SCRIPT_EVENT_OBJECT_VISIBILITY_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_OBJECT_VISIBILITY",
+    PROJECT_ROOT / "script_event_object_visibility.json",
+)
+SCRIPT_EVENT_CONDITIONAL_DIALOGUE_PATH = configured_path(
+    "POKEMON_EXTRACTOR_SCRIPT_EVENT_CONDITIONAL_DIALOGUE",
+    PROJECT_ROOT / "script_event_conditional_dialogue.json",
+)
+AUDIO_MANIFEST_PATH = configured_path(
+    "POKEMON_EXTRACTOR_AUDIO_MANIFEST",
+    PROJECT_ROOT / "audio_manifest.json",
+)
+GRAPHICS_OUTPUT_DIR = configured_path(
+    "POKEMON_EXTRACTOR_GRAPHICS_DIR",
+    PROJECT_ROOT / "build" / "graphics",
+)
+AUDIO_OUTPUT_DIR = configured_path(
+    "POKEMON_EXTRACTOR_AUDIO_DIR",
+    PROJECT_ROOT / "build" / "audio",
+)
 
 # Some Red/Blue tilesets share blockset/graphics data under a different ID.
 TILESET_BLOCKSET_ALIASES = {

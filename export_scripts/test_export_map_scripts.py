@@ -16,7 +16,7 @@ from export_script_candidates import (
     boulder_target_runtime_diagnostics,
     cerulean_city_rival_candidates,
     champion_hall_of_fame_runtime_diagnostics,
-    capturequest_authored_runtime_diagnostics,
+    authored_runtime_diagnostics,
     cinnabar_gym_default_runtime_diagnostics,
     cinnabar_gym_map_load_reset_candidate,
     cinnabar_gym_trainer_text_candidates,
@@ -125,7 +125,7 @@ def generated_label_coverage_for_tests():
         trainer_after_battle_flag_runtime_diagnostics(),
         champion_hall_of_fame_runtime_diagnostics(),
         oak_intro_runtime_diagnostics(),
-        capturequest_authored_runtime_diagnostics(),
+        authored_runtime_diagnostics(),
         pallet_daisy_map_load_runtime_diagnostics(),
         pokemon_tower7f_rocket_exit_runtime_diagnostics(),
         cinnabar_gym_default_runtime_diagnostics(),
@@ -149,11 +149,11 @@ class InGameTradeDiagnosticTest(unittest.TestCase):
         self.assertEqual(diagnostic["reason"], "inactive_in_game_trade_definition_v1")
 
 
-class CaptureQuestAuthoredRuntimeDiagnosticTest(unittest.TestCase):
+class AuthoredRuntimeDiagnosticTest(unittest.TestCase):
     def test_known_authored_runtime_labels_are_covered(self):
         diagnostics = {
             (diagnostic["mapName"], diagnostic["scriptLabel"]): diagnostic
-            for diagnostic in capturequest_authored_runtime_diagnostics()
+            for diagnostic in authored_runtime_diagnostics()
         }
 
         self.assertEqual(
@@ -167,8 +167,65 @@ class CaptureQuestAuthoredRuntimeDiagnosticTest(unittest.TestCase):
         )
         for diagnostic in diagnostics.values():
             self.assertEqual(diagnostic["status"], "covered")
-            self.assertEqual(diagnostic["reason"], "capturequest_authored_runtime_v1")
-            self.assertIn("captureQuestScript", diagnostic["details"])
+            self.assertEqual(diagnostic["reason"], "authored_runtime_coverage_v1")
+            self.assertIn("runtimeConcepts", diagnostic["details"]["source"])
+
+
+class DefaultExtractionNeutralityTest(unittest.TestCase):
+    FORBIDDEN_VOCABULARY = ("capturequest", "capture quest", "capture-quest")
+
+    def test_default_core_module_contains_no_downstream_project_vocabulary(self):
+        core_source = (Path(__file__).resolve().parent / "export_script_candidates.py").read_text().casefold()
+
+        for term in self.FORBIDDEN_VOCABULARY:
+            self.assertNotIn(term, core_source)
+
+    def test_default_candidate_and_diagnostic_records_are_project_neutral(self):
+        from export_script_candidates import ADAPTERS
+
+        records = []
+        for adapter in ADAPTERS:
+            records.extend(adapter())
+        records.extend(champion_hall_of_fame_runtime_diagnostics())
+        records.extend(oak_intro_runtime_diagnostics())
+        records.extend(authored_runtime_diagnostics())
+        serialized = json.dumps(records, sort_keys=True).casefold()
+
+        for term in self.FORBIDDEN_VOCABULARY:
+            self.assertNotIn(term, serialized)
+
+    def test_downstream_profile_is_opt_in_and_does_not_mutate_neutral_records(self):
+        from adapters.capturequest import PROFILE, capturequest_authored_runtime_diagnostics
+        from runtime_profiles import apply_candidate_profile, apply_diagnostic_profile
+
+        neutral = champion_hall_of_fame_runtime_diagnostics()
+        customized = apply_diagnostic_profile(neutral, PROFILE)
+        by_label = {row["scriptLabel"]: row for row in customized}
+
+        self.assertNotIn("runtimeProfile", neutral[0]["details"])
+        self.assertEqual(
+            by_label["ChampionsRoomRivalText"]["details"]["runtimeProfile"]["script"],
+            "ChampionsRoomRivalIntro",
+        )
+        self.assertEqual(
+            by_label["ChampionsRoomRivalText"]["details"]["captureQuestScript"],
+            "ChampionsRoomRivalIntro",
+        )
+
+        neutral_candidates = game_corner_rocket_defeated_candidate()
+        customized_candidates = apply_candidate_profile(neutral_candidates, PROFILE)
+        self.assertEqual(
+            neutral_candidates[0]["actions"][2]["movements"],
+            ["DOWN", "RIGHT", "RIGHT", "UP", "RIGHT", "RIGHT", "RIGHT", "RIGHT"],
+        )
+        self.assertEqual(
+            customized_candidates[0]["actions"][2]["movements"],
+            ["DOWN", "DOWN", "DOWN", "RIGHT", "RIGHT"],
+        )
+
+        legacy_diagnostics = capturequest_authored_runtime_diagnostics()
+        self.assertEqual(legacy_diagnostics[0]["reason"], "capturequest_authored_runtime_v1")
+        self.assertIn("captureQuestScript", legacy_diagnostics[0]["details"])
 
 
 class PalletDaisyRuntimeDiagnosticTest(unittest.TestCase):
@@ -602,7 +659,7 @@ class BadgeOrEventGatedDialogueCandidateTest(unittest.TestCase):
         )
         self.assertEqual(
             closed["actions"][1]["lines"],
-            ["This POKEMON GYM\nis always closed.", "I wonder who the\nLEADER is?"],
+            ["This POKÉMON GYM\nis always closed.", "I wonder who the\nLEADER is?"],
         )
         self.assertEqual(closed["source"]["adapter"], "badge_or_event_gated_dialogue_v1")
 
@@ -677,17 +734,17 @@ class ChampionHallOfFameRuntimeDiagnosticTest(unittest.TestCase):
             for diagnostic in champion_hall_of_fame_runtime_diagnostics()
         }
 
-        self.assertEqual(
-            diagnostics["ChampionsRoomRivalText"]["details"]["captureQuestScript"],
-            "ChampionsRoomRivalIntro",
+        self.assertIn(
+            "starter_specific_trainer_battle",
+            diagnostics["ChampionsRoomRivalText"]["details"]["source"]["runtimeConcepts"],
         )
-        self.assertEqual(
-            diagnostics["ChampionsRoomPlayerFollowsOakScript"]["details"]["captureQuestScript"],
-            "ChampionsRoomVictory",
+        self.assertIn(
+            "warp_to_hall_of_fame",
+            diagnostics["ChampionsRoomPlayerFollowsOakScript"]["details"]["source"]["runtimeConcepts"],
         )
-        self.assertEqual(
-            diagnostics["HallOfFameOakCongratulationsScript"]["details"]["captureQuestScript"],
-            "HallOfFameOakCongratulations",
+        self.assertIn(
+            "cerulean_cave_unlock",
+            diagnostics["HallOfFameOakCongratulationsScript"]["details"]["source"]["runtimeConcepts"],
         )
         self.assertEqual(
             diagnostics["HallOfFameOakCongratulationsScript"]["reason"],
@@ -702,30 +759,24 @@ class OakIntroRuntimeDiagnosticTest(unittest.TestCase):
             for diagnostic in oak_intro_runtime_diagnostics()
         }
 
-        self.assertEqual(
-            diagnostics["PalletTownDefaultScript"]["details"]["captureQuestScript"],
-            "PalletTownOakStopsPlayer",
-        )
-        self.assertEqual(
-            diagnostics["OaksLabOakChooseMonSpeechScript"]["details"]["captureQuestScript"],
-            "OaksLabChooseStarterIntro",
+        self.assertIn(
+            "oak_blocks_north_exit",
+            diagnostics["PalletTownDefaultScript"]["details"]["source"]["runtimeConcepts"],
         )
         self.assertIn(
-            "OaksLabChooseBulbasaur",
-            diagnostics["OaksLabRivalEndBattleScript"]["details"]["captureQuestScript"],
-        )
-        self.assertEqual(
-            diagnostics["OaksLabOakGivesPokedexScript"]["details"]["captureQuestScript"],
-            "OaksLabPokedexDelivery",
+            "starter_choice_unlocked",
+            diagnostics["OaksLabOakChooseMonSpeechScript"]["details"]["source"]["runtimeConcepts"],
         )
         self.assertIn(
-            "OaksLabPokedexDelivery",
-            diagnostics["OaksLab_Script"]["details"]["captureQuestScript"],
+            "first_rival_battle_completion",
+            diagnostics["OaksLabRivalEndBattleScript"]["details"]["source"]["runtimeConcepts"],
         )
         self.assertIn(
-            "OaksLabRivalPicksStarter",
-            diagnostics["OaksLabRivalText"]["details"]["captureQuestScript"],
+            "pokedex_delivery",
+            diagnostics["OaksLabOakGivesPokedexScript"]["details"]["source"]["runtimeConcepts"],
         )
+        self.assertNotIn("runtimeProfile", diagnostics["OaksLab_Script"]["details"])
+        self.assertNotIn("runtimeProfile", diagnostics["OaksLabRivalText"]["details"])
         self.assertEqual(diagnostics["OaksLabOak1Text"]["reason"], "oak_intro_runtime_v1")
 
 
@@ -1290,7 +1341,7 @@ class FacingUpDialogueCandidateTest(unittest.TestCase):
 
         self.assertEqual(snorlax["conditions"]["requiresPlayerFacing"], "UP")
         self.assertEqual(snorlax["conditions"]["requiresEventAbsent"], "EVENT_BEAT_ROUTE12_SNORLAX")
-        assert_dialogue_contains(self, snorlax["actions"][1]["lines"], "A big POKEMON is")
+        assert_dialogue_contains(self, snorlax["actions"][1]["lines"], "A big POKÉMON is")
         assert_dialogue_contains(self, snorlax["actions"][1]["lines"], "asleep on a road!")
 
         self.assertEqual(clear["conditions"]["requiresPlayerFacing"], "UP")
@@ -1785,9 +1836,17 @@ class GameCornerRocketDefeatedCandidateTest(unittest.TestCase):
         self.assertEqual(candidate["actions"][0], {"type": "lockInput"})
         assert_dialogue_contains(self, candidate["actions"][1]["lines"], "Dang!")
         assert_dialogue_contains(self, candidate["actions"][1]["lines"], "Our hideout might")
+        movement = candidate["actions"][2]
+        self.assertEqual(movement["type"], "move")
+        self.assertEqual(movement["actor"], "ROCKET")
         self.assertEqual(
-            candidate["actions"][2],
-            {"type": "move", "actor": "ROCKET", "movements": ["DOWN", "DOWN", "DOWN", "RIGHT", "RIGHT"]},
+            movement["movements"],
+            ["DOWN", "RIGHT", "RIGHT", "UP", "RIGHT", "RIGHT", "RIGHT", "RIGHT"],
+        )
+        self.assertEqual(movement["movementVariants"][0]["when"], {"playerY": 6})
+        self.assertEqual(
+            movement["movementVariants"][0]["movements"],
+            ["RIGHT", "RIGHT", "RIGHT", "RIGHT", "RIGHT"],
         )
         self.assertEqual(candidate["actions"][3], {"type": "setEvent", "event": "EVENT_GAME_CORNER_ROCKET_LEFT"})
         self.assertEqual(candidate["actions"][4], {"type": "hideActor", "actor": "ROCKET"})
@@ -1805,7 +1864,7 @@ class GameCornerRocketDefeatedCandidateTest(unittest.TestCase):
 
 
 class SSAnne2FRivalCandidateTest(unittest.TestCase):
-    def test_rival_encounter_is_generated_but_preservable_as_capturequest_override(self):
+    def test_rival_encounter_preserves_source_coordinate_variants(self):
         candidates = ss_anne_2f_rival_candidate()
 
         self.assertEqual(len(candidates), 1)
@@ -1971,7 +2030,7 @@ class GymLeaderBattleTextCandidateTest(unittest.TestCase):
             [
                 "I'm BROCK!\nI'm PEWTER's GYM LEADER!",
                 "I believe in rock\nhard defense and determination!",
-                "That's why my\nPOKEMON are all the rock-type!",
+                "That's why my\nPOKÉMON are all the rock-type!",
                 "Do you still want\nto challenge me? Fine then! Show me your best!",
             ],
         )
@@ -2106,7 +2165,7 @@ class CeruleanCityRivalCandidateTest(unittest.TestCase):
         self.assertEqual(rival["conditions"], {"requiresEventAbsent": "EVENT_BEAT_CERULEAN_RIVAL"})
         self.assertEqual(rival["actions"][1], {"type": "showActor", "actor": "RIVAL", "x": 20, "y": 4})
         self.assertEqual(rival["actions"][3], {"type": "facePlayer", "actor": "RIVAL", "direction": "DOWN"})
-        assert_dialogue_contains(self, rival["actions"][4]["lines"], "<RIVAL>: Yo!")
+        assert_dialogue_contains(self, rival["actions"][4]["lines"], "{RIVAL}: Yo!")
         assert_dialogue_contains(self, rival["actions"][4]["lines"], "what you caught,")
 
         battle = rival["actions"][5]
@@ -2143,7 +2202,7 @@ class Route22RivalCandidateTest(unittest.TestCase):
                 "requiresEventAbsent": "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE",
             },
         )
-        assert_dialogue_contains(self, rival1["actions"][4]["lines"], "<RIVAL>: Hey!")
+        assert_dialogue_contains(self, rival1["actions"][4]["lines"], "{RIVAL}: Hey!")
         battle1 = rival1["actions"][5]
         self.assertEqual(battle1["trainerClass"], "RIVAL1")
         self.assertEqual(battle1["winFlag"], "EVENT_BEAT_ROUTE22_RIVAL_1ST_BATTLE")
@@ -2186,7 +2245,7 @@ class SilphCo7FRivalCandidateTest(unittest.TestCase):
         self.assertEqual(upper["trigger"]["coordinates"], [{"x": 3, "y": 2}])
         self.assertEqual(lower["trigger"]["coordinates"], [{"x": 3, "y": 3}])
         self.assertEqual(upper["conditions"], {"requiresEventAbsent": "EVENT_BEAT_SILPH_CO_RIVAL"})
-        assert_dialogue_contains(self, upper["actions"][1]["lines"], "<RIVAL>: What")
+        assert_dialogue_contains(self, upper["actions"][1]["lines"], "{RIVAL}: What")
         self.assertEqual(upper["actions"][2], {"type": "move", "actor": "RIVAL", "movements": ["UP", "UP", "UP"]})
         self.assertEqual(lower["actions"][2], {"type": "move", "actor": "RIVAL", "movements": ["UP", "UP", "UP", "UP"]})
 

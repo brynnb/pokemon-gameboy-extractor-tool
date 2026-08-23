@@ -2,20 +2,27 @@
     "name": "pokemon-gameboy-offline-viewer",
     "description": "Offline Phaser viewer for extracted Pokemon Red/Blue maps.",
     "version": "1.0.0",
+    "private": true,
     "author": "",
     "license": "MIT",
+    "engines": {
+        "node": ">=20.19.0",
+        "npm": ">=10.0.0"
+    },
     "scripts": {
         "dev": "vite --config vite/config.dev.mjs",
+        "typecheck": "tsc --noEmit",
+        "test": "npm run typecheck",
         "build": "vite build --config vite/config.prod.mjs",
         "preview": "vite preview --config vite/config.prod.mjs"
     },
     "devDependencies": {
-        "terser": "^5.31.0",
-        "typescript": "^5.4.5",
-        "vite": "^5.3.1"
+        "terser": "5.50.0",
+        "typescript": "5.9.3",
+        "vite": "7.3.6"
     },
     "dependencies": {
-        "phaser": "^3.88.2",
-        "webfontloader": "^1.6.28"
+        "phaser": "3.90.0",
+        "webfontloader": "1.6.28"
     }
 }

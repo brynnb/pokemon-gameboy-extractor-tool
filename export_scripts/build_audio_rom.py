@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build a tiny Game Boy ROM that plays one Red/Blue audio constant."""
+"""Build a source-derived GBS player (or diagnostic GB ROM) for one sound."""
 
 import argparse
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,38 @@ ROM0
 \t"Header"
 \torg $0150
 \t"Audio Harness Home"
+ROMX $2
+\t"Sound Effect Headers 1"
+\t"Music Headers 1"
+\t"Sound Effects 1"
+\t"Audio Engine 1"
+\t"Music 1"
+ROMX $8
+\t"Sound Effect Headers 2"
+\t"Music Headers 2"
+\t"Sound Effects 2"
+\t"Low Health Alarm (Audio Engine 2)"
+\t"Audio Engine 2"
+\t"Music 2"
+ROMX $1f
+\t"Sound Effect Headers 3"
+\t"Music Headers 3"
+\t"Sound Effects 3"
+\t"Audio Engine 3"
+\t"Music 3"
+WRAM0
+\t"Audio Harness WRAM"
+HRAM
+\t"Audio Harness HRAM"
+"""
+
+
+GBS_LINKER_SCRIPT = """\
+ROM0
+\torg $0400
+\t"GBS Forwarded Vectors"
+\torg $0440
+\t"GBS Audio Harness Home"
 ROMX $2
 \t"Sound Effect Headers 1"
 \t"Music Headers 1"
@@ -172,8 +205,6 @@ Start:
 \tcall InitAudioHarness
 \txor a
 \tldh [rIF], a
-\tld a, %11100100
-\tldh [rBGP], a
 \tld a, 1 << rLCDC_ENABLE | 1 << rLCDC_BG_PRIORITY
 \tldh [rLCDC], a
 
@@ -384,6 +415,124 @@ INCLUDE "audio.asm"
 """
 
 
+def gbs_harness_asm(
+    constant,
+    engine,
+    frequency_modifier=0,
+    tempo_modifier=0,
+    mute_finished_sfx=False,
+):
+    """Build a GBS-conformant init/play harness around the source engine."""
+    rendered = harness_asm(
+        constant,
+        engine,
+        frequency_modifier=frequency_modifier,
+        tempo_modifier=tempo_modifier,
+        mute_finished_sfx=mute_finished_sfx,
+    )
+    common = rendered[rendered.index("InitAudioHarness:") :]
+    vblank_start = common.index("VBlank:")
+    mute_start = common.index("MuteFinishedSfxChannels:")
+    common = common[:vblank_start] + common[mute_start:]
+    play_label = f"Audio{engine}_PlaySound"
+    update_label = f"Audio{engine}_UpdateMusic"
+    mute_call = "\tcall MuteFinishedSfxChannels\n" if mute_finished_sfx else ""
+    return f"""\
+SECTION "GBS Forwarded Vectors", ROM0[$0400]
+\tret
+\tds $0408 - @, 0
+\tret
+\tds $0410 - @, 0
+\tret
+\tds $0418 - @, 0
+\tret
+\tds $0420 - @, 0
+\tret
+\tds $0428 - @, 0
+\tret
+\tds $0430 - @, 0
+\tret
+\tds $0438 - @, 0
+\tret
+\tds $0440 - @, 0
+
+SECTION "GBS Audio Harness Home", ROM0[$0440]
+
+GBSInit::
+\tcall InitAudioHarness
+\tld a, BANK({play_label})
+\tld [wAudioROMBank], a
+\tld [wAudioSavedROMBank], a
+\tldh [hLoadedROMBank], a
+\tld [MBC1RomBank], a
+\tld a, ${frequency_modifier:02x}
+\tld [wFrequencyModifier], a
+\tld a, ${tempo_modifier:02x}
+\tld [wTempoModifier], a
+\tld a, {constant}
+\tcall {play_label}
+\tret
+
+GBSPlay::
+\tpush af
+\tpush bc
+\tpush de
+\tpush hl
+\tld a, BANK({update_label})
+\tldh [hLoadedROMBank], a
+\tld [MBC1RomBank], a
+\tcall {update_label}
+{mute_call}\tcall MuteWhenAudioDone
+\tpop hl
+\tpop de
+\tpop bc
+\tpop af
+\tret
+
+{common}"""
+
+
+def parse_symbol_address(symbol_path, label):
+    for line in Path(symbol_path).read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[1] == label:
+            return int(fields[0].split(":", 1)[1], 16)
+    raise ValueError(f"linked symbol is missing {label}: {symbol_path}")
+
+
+def gbs_text_field(value):
+    encoded = value.encode("ascii", errors="strict")
+    if len(encoded) > 31:
+        raise ValueError(f"GBS text field is too long: {value!r}")
+    return encoded + bytes(32 - len(encoded))
+
+
+def write_gbs(output, linked_rom, symbol_path):
+    load_address = 0x0400
+    init_address = parse_symbol_address(symbol_path, "GBSInit")
+    play_address = parse_symbol_address(symbol_path, "GBSPlay")
+    rom = Path(linked_rom).read_bytes()
+    header = struct.pack(
+        "<3sBBBHHHHBB",
+        b"GBS",
+        1,
+        1,
+        1,
+        load_address,
+        init_address,
+        play_address,
+        0xDFFF,
+        0,
+        0,
+    )
+    header += gbs_text_field("Pokemon Red/Blue Audio")
+    header += gbs_text_field("pokered source engine")
+    header += gbs_text_field("See source data license")
+    if len(header) != 0x70:
+        raise AssertionError(f"invalid GBS header length: {len(header)}")
+    Path(output).write_bytes(header + rom[load_address:])
+
+
 def run(command, cwd):
     subprocess.run(command, cwd=cwd, check=True)
 
@@ -396,6 +545,12 @@ def build_audio_rom(
     frequency_modifier=0,
     tempo_modifier=0,
 ):
+    for label, value in (
+        ("frequency modifier", frequency_modifier),
+        ("tempo modifier", tempo_modifier),
+    ):
+        if not isinstance(value, int) or not 0 <= value <= 0xFF:
+            raise ValueError(f"{label} must be an integer from 0 to 255, got {value!r}")
     missing_tools = [tool for tool in ("rgbasm", "rgblink", "rgbfix") if shutil.which(tool) is None]
     if missing_tools:
         raise RuntimeError(f"Missing required tool(s): {', '.join(missing_tools)}")
@@ -427,7 +582,99 @@ def build_audio_rom(
 
     run(["rgbasm", "-P", "includes.asm", "-D", "_RED", "-o", str(object_path), str(asm_path)], GAME_DATA_ROOT)
     run(["rgblink", "-p", "0", "-l", str(link_path), "-o", str(output), str(object_path)], GAME_DATA_ROOT)
-    run(["rgbfix", "-v", "-p", "0", "-m", "MBC1", "-r", "0", "-t", "CQ AUDIO", str(output)], GAME_DATA_ROOT)
+    run(
+        [
+            "rgbfix",
+            "-v",
+            "-p",
+            "0",
+            "-m",
+            "MBC1",
+            "-r",
+            "0",
+            "-t",
+            "PKMN AUDIO",
+            str(output),
+        ],
+        GAME_DATA_ROOT,
+    )
+    return output
+
+
+def build_audio_gbs(
+    constant,
+    output,
+    manifest_path=AUDIO_MANIFEST_PATH,
+    build_dir=None,
+    frequency_modifier=0,
+    tempo_modifier=0,
+):
+    """Build a standards-compliant GBS with returning init/play entry points."""
+    for label, value in (
+        ("frequency modifier", frequency_modifier),
+        ("tempo modifier", tempo_modifier),
+    ):
+        if not isinstance(value, int) or not 0 <= value <= 0xFF:
+            raise ValueError(f"{label} must be an integer from 0 to 255, got {value!r}")
+    missing_tools = [tool for tool in ("rgbasm", "rgblink") if shutil.which(tool) is None]
+    if missing_tools:
+        raise RuntimeError(f"Missing required tool(s): {', '.join(missing_tools)}")
+
+    manifest = load_manifest(manifest_path)
+    asset = find_audio_asset(manifest, constant)
+    engine = choose_engine(asset)
+    constant = asset["constant"]
+
+    build_root = Path(build_dir or (PROJECT_ROOT / "build" / "audio-gbs")).resolve()
+    build_root.mkdir(parents=True, exist_ok=True)
+    asm_path = build_root / "audio_harness.asm"
+    link_path = build_root / "audio_harness.link"
+    object_path = build_root / "audio_harness.o"
+    linked_rom = build_root / "audio_harness.bin"
+    symbol_path = build_root / "audio_harness.sym"
+    output = Path(output).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    asm_path.write_text(
+        gbs_harness_asm(
+            constant,
+            engine,
+            frequency_modifier=frequency_modifier,
+            tempo_modifier=tempo_modifier,
+            mute_finished_sfx=constant.startswith("SFX_"),
+        ),
+        encoding="utf-8",
+    )
+    link_path.write_text(GBS_LINKER_SCRIPT, encoding="utf-8")
+    run(
+        [
+            "rgbasm",
+            "-P",
+            "includes.asm",
+            "-D",
+            "_RED",
+            "-o",
+            str(object_path),
+            str(asm_path),
+        ],
+        GAME_DATA_ROOT,
+    )
+    run(
+        [
+            "rgblink",
+            "-p",
+            "0",
+            "-l",
+            str(link_path),
+            "-n",
+            str(symbol_path),
+            "-o",
+            str(linked_rom),
+            str(object_path),
+        ],
+        GAME_DATA_ROOT,
+    )
+    write_gbs(output, linked_rom, symbol_path)
     return output
 
 
@@ -443,8 +690,14 @@ def main():
     parser.add_argument(
         "--out",
         type=Path,
-        default=PROJECT_ROOT / "build" / "audio-rom" / "audio.gb",
-        help="Output .gb path",
+        default=PROJECT_ROOT / "build" / "audio-gbs" / "audio.gbs",
+        help="Output path (defaults to a supported .gbs player).",
+    )
+    parser.add_argument(
+        "--container",
+        choices=["gbs", "gb"],
+        default="gbs",
+        help="GBS is intended for rendering; GB is a diagnostic hardware ROM.",
     )
     parser.add_argument(
         "--build-dir",
@@ -467,7 +720,8 @@ def main():
     args = parser.parse_args()
 
     try:
-        output = build_audio_rom(
+        builder = build_audio_gbs if args.container == "gbs" else build_audio_rom
+        output = builder(
             args.constant,
             args.out,
             args.manifest,
@@ -476,7 +730,7 @@ def main():
             args.tempo_modifier,
         )
     except Exception as exc:
-        print(f"failed to build audio ROM: {exc}", file=sys.stderr)
+        print(f"failed to build audio player: {exc}", file=sys.stderr)
         return 1
 
     print(output)
