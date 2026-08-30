@@ -91,9 +91,12 @@ npm run render:audio -- --build-gbs --kind all --out-dir build/audio
 ```
 
 The renderer builds a source-derived GBS player per asset, captures the source
-engine through `gbsplay`, writes deterministic FLAC masters and Ogg Vorbis
-derivatives, and publishes an `audio-render-manifest.json` with hashes, sample
-metadata, source modifiers, and loop-capture metadata. Useful focused forms:
+engine through `gbsplay`, writes deterministic 48 kHz stereo FLAC masters and
+compact 24 kHz mono Ogg Vorbis derivatives, and publishes an
+`audio-render-manifest.json` with hashes, sample metadata, source modifiers,
+and loop-capture metadata. The distribution profile can be overridden with
+`--distribution-sample-rate`, `--distribution-channels`, and
+`--vorbis-quality`. Useful focused forms:
 
 ```bash
 npm run render:audio -- --build-gbs --kind music --out-dir build/audio

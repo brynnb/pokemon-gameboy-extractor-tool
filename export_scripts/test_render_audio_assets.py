@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from export_audio_manifest import build_manifest
 from render_audio_assets import (
     analyze_wav,
+    encode_outputs,
     output_path,
     render_rom_asset,
     selected_assets,
@@ -76,6 +78,39 @@ class AudioRendererTest(unittest.TestCase):
             self.assertLess(analysis["sampleFrames"], active_frames + silent_frames)
             self.assertGreater(analysis["peak"], 1000)
             self.assertGreater(analysis["rms"], 100)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+    def test_distribution_is_compact_mono_24khz(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source.wav"
+            with wave.open(str(source), "wb") as handle:
+                handle.setparams((2, 2, 48000, 0, "NONE", "not compressed"))
+                samples = []
+                for index in range(4800):
+                    value = int(5000 * math.sin(index * math.pi / 16))
+                    samples.extend((value, value))
+                handle.writeframes(b"".join(struct.pack("<h", value) for value in samples))
+
+            artifact = encode_outputs(
+                source,
+                root / "output",
+                {
+                    "assetKey": "test:compact",
+                    "constant": "TEST_COMPACT",
+                    "renderKind": "sfx",
+                    "path": "/sound/pokemon/sfx/compact.ogg",
+                    "masterPath": "/sound/pokemon/sfx/compact.flac",
+                },
+            )
+            distribution = root / "output/sound/pokemon/sfx/compact.ogg"
+            probe = json.loads(subprocess.check_output([
+                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=sample_rate,channels", "-of", "json",
+                str(distribution),
+            ]))
+            self.assertEqual(probe["streams"][0], {"sample_rate": "24000", "channels": 1})
+            self.assertEqual(artifact["distribution"]["quality"], 1)
 
     @unittest.skipUnless(RENDER_TOOLS_AVAILABLE, "RGBDS/gbsplay/ffmpeg are required")
     def test_source_engine_render_is_non_silent_deterministic_and_modifier_aware(self):
