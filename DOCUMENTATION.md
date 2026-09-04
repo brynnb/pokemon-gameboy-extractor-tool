@@ -248,6 +248,13 @@ space; stitched coordinates place the connected overworld maps in one global
 space. Use local coordinates for source events and global coordinates for an
 overworld view.
 
+`tilesets.grass_tile_id` preserves the native 8×8 grass sample declared by
+each tileset header. Each expanded square also exposes
+`tiles.raw_foot_tile_id` (the bottom-left collision sample) and
+`tiles.raw_encounter_tile_id` (the bottom-right wild-encounter sample). These
+source identities are stable across deduplicated PNG catalog rebuilds; consumers
+must not infer gameplay terrain from `tile_image_id`.
+
 Connections are normalized in `map_connections` with numeric map foreign keys,
 direction, and block offset. The convenience connection columns on `maps` also
 contain numeric map IDs. All 24 tileset constants are present; aliases point to

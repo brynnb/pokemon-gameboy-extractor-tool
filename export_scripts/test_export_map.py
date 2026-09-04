@@ -34,6 +34,12 @@ class MapExportIntegrityTest(unittest.TestCase):
                     )
                     self.assertEqual(
                         conn.execute(
+                            "SELECT name, grass_tile_id FROM tilesets WHERE grass_tile_id IS NOT NULL ORDER BY id"
+                        ).fetchall(),
+                        [("OVERWORLD", 0x52), ("FOREST", 0x20), ("PLATEAU", 0x45)],
+                    )
+                    self.assertEqual(
+                        conn.execute(
                             """
                             SELECT COUNT(*)
                             FROM tilesets

@@ -43,6 +43,7 @@ from config import (
     PROJECT_ROOT,
     TILESET_BLOCKSET_ALIASES,
     TILESET_CONSTANTS_FILE,
+    TILESET_HEADERS_FILE,
     TILESETS_DIR,
 )
 from tile_helpers import draw_scaled_tile, parse_2bpp_file, parse_blockset_file
@@ -53,6 +54,9 @@ MAP_CONST_PATTERN = re.compile(
 )
 MAP_HEADER_PATTERN = re.compile(r"\s*map_header\s+(\w+),\s+(\w+),\s+(\w+),\s+(.+)")
 TILESET_CONST_PATTERN = re.compile(r"\s*const\s+(\w+)(?:\s*;.*)?$")
+TILESET_HEADER_PATTERN = re.compile(
+    r"\s*tileset\s+(\w+)\s*,\s*[^,]+\s*,\s*[^,]+\s*,\s*[^,]+\s*,\s*([^,;]+)"
+)
 CONNECTION_PATTERN = re.compile(r"\s*connection\s+(\w+),\s+(\w+),\s+(\w+),\s+(-?\d+)")
 
 
@@ -99,6 +103,7 @@ def create_database():
         source_tileset_id INTEGER,
         blockset_path TEXT,
         tileset_path TEXT,
+        grass_tile_id INTEGER,
         FOREIGN KEY (source_tileset_id) REFERENCES tilesets (id)
     )
     """
@@ -217,6 +222,34 @@ def load_map_constants():
 
     print(f"Loaded {len(map_constants)} map constants")
     return map_constants
+
+
+def parse_asm_integer(value):
+    """Parse an RGBDS decimal/hex integer, returning None for -1 sentinels."""
+    token = value.strip()
+    if token == "-1":
+        return None
+    if token.startswith("$"):
+        return int(token[1:], 16)
+    return int(token, 10)
+
+
+def load_tileset_grass_tiles():
+    """Load each tileset's authoritative 8x8 grass tile from its native header."""
+    grass_tiles = {}
+    with open(TILESET_HEADERS_FILE, "r") as source:
+        for line_number, line in enumerate(source, start=1):
+            match = TILESET_HEADER_PATTERN.match(line)
+            if not match:
+                continue
+            name = match.group(1).upper()
+            try:
+                grass_tiles[name] = parse_asm_integer(match.group(2))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid grass tile in {TILESET_HEADERS_FILE}:{line_number}: {match.group(2)!r}"
+                ) from exc
+    return grass_tiles
 
 
 def load_tileset_constants():
@@ -717,6 +750,7 @@ def main():
     # Load constants and data
     map_constants = load_map_constants()
     tileset_constants = load_tileset_constants()
+    tileset_grass_tiles = load_tileset_grass_tiles()
     map_headers, map_to_constant, map_connections = extract_map_headers()
     map_data = extract_map_data()
     tileset_data = extract_tileset_data()
@@ -731,13 +765,16 @@ def main():
         tileset_id = tileset_info["id"]
         cursor.execute(
             """
-            INSERT INTO tilesets (id, name, source_tileset_id, blockset_path, tileset_path)
-            VALUES (?, ?, ?, NULL, NULL)
+            INSERT INTO tilesets (
+                id, name, source_tileset_id, blockset_path, tileset_path, grass_tile_id
+            )
+            VALUES (?, ?, ?, NULL, NULL, ?)
             """,
             (
                 tileset_id,
                 tileset_name,
                 TILESET_BLOCKSET_ALIASES.get(tileset_id),
+                tileset_grass_tiles.get(tileset_name),
             ),
         )
 

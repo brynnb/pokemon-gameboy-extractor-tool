@@ -67,7 +67,7 @@ def create_fixture(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE tilesets (
             id INTEGER, name TEXT, source_tileset_id INTEGER,
-            blockset_path TEXT, tileset_path TEXT
+            blockset_path TEXT, tileset_path TEXT, grass_tile_id INTEGER
         );
         CREATE TABLE map_connections (
             id INTEGER, from_map_id INTEGER, to_map_id INTEGER,
@@ -396,13 +396,14 @@ def create_fixture(conn: sqlite3.Connection) -> None:
         ],
     )
     conn.execute(
-        "INSERT INTO tilesets VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO tilesets VALUES (?, ?, ?, ?, ?, ?)",
         (
             1,
             "OVERWORLD",
             None,
             "pokemon-game-data/gfx/blocksets/overworld.bst",
             "pokemon-game-data/gfx/tilesets/overworld.png",
+            0x52,
         ),
     )
     conn.execute("INSERT INTO map_connections VALUES (1, 0, 1, 'north', 0)")

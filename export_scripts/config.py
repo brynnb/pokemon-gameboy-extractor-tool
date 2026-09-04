@@ -82,6 +82,7 @@ BATCH_SIZE = 1000
 
 MAP_CONSTANTS_FILE = CONSTANTS_DIR / "map_constants.asm"
 TILESET_CONSTANTS_FILE = CONSTANTS_DIR / "tileset_constants.asm"
+TILESET_HEADERS_FILE = TILESET_DATA_DIR / "tileset_headers.asm"
 ITEM_CONSTANTS_FILE = CONSTANTS_DIR / "item_constants.asm"
 MOVE_CONSTANTS_FILE = CONSTANTS_DIR / "move_constants.asm"
 POKEDEX_CONSTANTS_FILE = CONSTANTS_DIR / "pokedex_constants.asm"

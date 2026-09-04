@@ -342,6 +342,44 @@ def validate_generated_database(
         if unresolved_maps:
             raise PipelineError(f"Wild encounters have {unresolved_maps} unresolved maps")
 
+        missing_native_tile_metadata = conn.execute(
+            """
+            SELECT COUNT(*) FROM tiles
+            WHERE raw_foot_tile_id IS NULL OR raw_encounter_tile_id IS NULL
+            """
+        ).fetchone()[0]
+        if missing_native_tile_metadata:
+            raise PipelineError(
+                f"Tiles have {missing_native_tile_metadata} missing native step samples"
+            )
+
+        untaggable_grass_maps = conn.execute(
+            """
+            SELECT DISTINCT encounter.map_id, encounter.map_name
+            FROM wild_encounters AS encounter
+            JOIN maps AS map ON map.id = encounter.map_id
+            LEFT JOIN tilesets AS tileset ON tileset.id = map.tileset_id
+            WHERE encounter.encounter_type = 'grass'
+              AND encounter.encounter_rate > 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM tiles AS tile
+                  WHERE tile.map_id = map.id
+                    AND tile.collision_type = 1
+                    AND (
+                        (map.is_overworld = 0 AND COALESCE(map.tileset_id, -1) <> 3)
+                        OR tile.raw_encounter_tile_id = tileset.grass_tile_id
+                    )
+              )
+            ORDER BY encounter.map_id
+            """
+        ).fetchall()
+        if untaggable_grass_maps:
+            raise PipelineError(
+                "Grass encounter maps have no eligible native squares: "
+                f"{untaggable_grass_maps[:10]}"
+            )
+
         unresolved_hidden = conn.execute(
             "SELECT COUNT(*) FROM hidden_objects WHERE map_id IS NULL"
         ).fetchone()[0]

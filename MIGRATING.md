@@ -81,6 +81,9 @@ The Good Rod list is global source data and intentionally has no `map_id`.
 Map connection fields and `map_connections` now contain numeric map IDs. All
 24 tileset constants have rows; shared physical data is represented through
 `tilesets.source_tileset_id`. Hidden objects now resolve to their source maps.
+Terrain-sensitive consumers should compare `tiles.raw_encounter_tile_id` with
+`tilesets.grass_tile_id`. Do not carry forward numeric `tile_image_id` allowlists:
+those IDs are identities within one generated image catalog, not native tile IDs.
 
 Warps now distinguish `destination_kind = 'fixed'` from the engine's dynamic
 `destination_kind = 'last-map'`. A `last-map` row deliberately has no

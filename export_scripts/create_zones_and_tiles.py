@@ -34,6 +34,19 @@ from tile_helpers import (
     render_block_quadrant_image,
 )
 
+STEP_FOOT_TILE_INDICES = (4, 6, 12, 14)
+STEP_ENCOUNTER_TILE_INDICES = (5, 7, 13, 15)
+
+
+def native_step_tile_ids(block_data, position):
+    """Return the native collision-foot and wild-encounter sample tile IDs."""
+    if position < 0 or position >= 4 or len(block_data) < 16:
+        raise ValueError(f"Invalid block quadrant {position} for {len(block_data)} bytes")
+    return (
+        block_data[STEP_FOOT_TILE_INDICES[position]],
+        block_data[STEP_ENCOUNTER_TILE_INDICES[position]],
+    )
+
 
 def create_new_tables():
     """Create new tiles and tile_images tables in the database"""
@@ -57,6 +70,8 @@ def create_new_tables():
         tile_image_id INTEGER NOT NULL,
         is_overworld INTEGER NOT NULL DEFAULT 0,
         collision_type INTEGER NOT NULL DEFAULT 0,
+        raw_foot_tile_id INTEGER NOT NULL,
+        raw_encounter_tile_id INTEGER NOT NULL,
         FOREIGN KEY (map_id) REFERENCES maps (id),
         FOREIGN KEY (tile_image_id) REFERENCES tile_images (id)
     )
@@ -416,8 +431,10 @@ def populate_tiles(conn, block_pos_to_image_id):
                 collision_type = 0
 
                 # Get the bottom-left 8x8 sub-tile for this position
-                bl_sub_indices = {0: 4, 1: 6, 2: 12, 3: 14}
-                bl_idx = bl_sub_indices[position]
+                bl_idx = STEP_FOOT_TILE_INDICES[position]
+                raw_foot_tile_id, raw_encounter_tile_id = native_step_tile_ids(
+                    block_data, position
+                )
 
                 # Also gather all 4 sub-tiles for water detection
                 tile_sub_indices = []
@@ -459,6 +476,8 @@ def populate_tiles(conn, block_pos_to_image_id):
                         tile_image_id,
                         is_overworld,
                         collision_type,
+                        raw_foot_tile_id,
+                        raw_encounter_tile_id,
                     )
                 )
 
@@ -473,8 +492,11 @@ def populate_tiles(conn, block_pos_to_image_id):
         if len(tiles_data) >= BATCH_SIZE:
             cursor.executemany(
                 """
-            INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, collision_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tiles (
+                x, y, local_x, local_y, map_id, tile_image_id, is_overworld,
+                collision_type, raw_foot_tile_id, raw_encounter_tile_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 tiles_data,
             )
@@ -485,8 +507,11 @@ def populate_tiles(conn, block_pos_to_image_id):
     if tiles_data:
         cursor.executemany(
             """
-        INSERT INTO tiles (x, y, local_x, local_y, map_id, tile_image_id, is_overworld, collision_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tiles (
+            x, y, local_x, local_y, map_id, tile_image_id, is_overworld,
+            collision_type, raw_foot_tile_id, raw_encounter_tile_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             tiles_data,
         )
