@@ -26,6 +26,7 @@ from config import (
     TILE_IMAGE_OUTPUT_DIR,
     TILESET_IMAGE_ALIAS_TARGETS,
     TILE_IMAGES_DIR,
+    TILESET_DATA_DIR,
     remap_tileset_for_blockset,
 )
 from tile_helpers import (
@@ -46,6 +47,35 @@ def native_step_tile_ids(block_data, position):
         block_data[STEP_FOOT_TILE_INDICES[position]],
         block_data[STEP_ENCOUNTER_TILE_INDICES[position]],
     )
+
+
+def water_tileset_names():
+    """Read the original IsNextTileShoreOrWater tileset allowlist."""
+    path = TILESET_DATA_DIR / "water_tilesets.asm"
+    names = set()
+    for line in path.read_text().splitlines():
+        line = line.split(";", 1)[0].strip()
+        if not line or line == "WaterTilesets:":
+            continue
+        if line == "db -1":
+            return names
+        match = re.fullmatch(r"db\s+([A-Z_]+)", line)
+        if not match:
+            raise ValueError(f"Unsupported water tileset source in {path}: {line}")
+        names.add(match.group(1))
+    raise ValueError(f"Unterminated water tileset source: {path}")
+
+
+def step_collision_type(foot_tile_id, tileset_name, water_tilesets, walkable_tiles):
+    # Tile numbers are tileset-local. IsNextTileShoreOrWater samples the tile
+    # at the player's feet, not decorative subtiles elsewhere in the square.
+    # Its $32 shore exception excludes SHIP_PORT's boarding platform.
+    water = foot_tile_id == 0x14 or (
+        foot_tile_id in (0x32, 0x48) and tileset_name != "SHIP_PORT"
+    )
+    if tileset_name in water_tilesets and water:
+        return 2
+    return 1 if foot_tile_id in walkable_tiles else 0
 
 
 def create_new_tables():
@@ -292,6 +322,15 @@ def populate_tiles(conn, block_pos_to_image_id):
     )
 
     maps = cursor.fetchall()
+    tileset_names = dict(cursor.execute("SELECT id, name FROM tilesets"))
+    water_tilesets = water_tileset_names()
+    missing_names = water_tilesets - set(tileset_names.values())
+    if missing_names:
+        raise ValueError(f"Water tilesets missing from catalog: {sorted(missing_names)}")
+    walkable_by_tileset = {}
+    if has_collision_tiles:
+        for identity, tile_id in cursor.execute("SELECT tileset_id, tile_id FROM collision_tiles"):
+            walkable_by_tileset.setdefault(identity, set()).add(tile_id)
     total_maps = len(maps)
 
     print(f"Processing {total_maps} maps...")
@@ -428,42 +467,17 @@ def populate_tiles(conn, block_pos_to_image_id):
                 #   Pos 1 (TR): index 6
                 #   Pos 2 (BL): index 12
                 #   Pos 3 (BR): index 14
-                collision_type = 0
-
                 # Get the bottom-left 8x8 sub-tile for this position
-                bl_idx = STEP_FOOT_TILE_INDICES[position]
                 raw_foot_tile_id, raw_encounter_tile_id = native_step_tile_ids(
                     block_data, position
                 )
 
-                # Also gather all 4 sub-tiles for water detection
-                tile_sub_indices = []
-                if position == 0:
-                    tile_sub_indices = [0, 1, 4, 5]
-                elif position == 1:
-                    tile_sub_indices = [2, 3, 6, 7]
-                elif position == 2:
-                    tile_sub_indices = [8, 9, 12, 13]
-                elif position == 3:
-                    tile_sub_indices = [10, 11, 14, 15]
-
-                raw_tile_ids = []
-                for sub_idx in tile_sub_indices:
-                    if sub_idx < len(block_data):
-                        raw_tile_ids.append(block_data[sub_idx])
-
-                # Check for Water ($14, $48)
-                if any(tid == 0x14 or tid == 0x48 for tid in raw_tile_ids):
-                    collision_type = 2
-                elif has_collision_tiles and bl_idx < len(block_data):
-                    # Check if the bottom-left 8x8 tile is in the walkable list
-                    bl_tile_id = block_data[bl_idx]
-                    cursor.execute(
-                        "SELECT COUNT(*) FROM collision_tiles WHERE tileset_id = ? AND tile_id = ?",
-                        (raw_tileset_id, bl_tile_id),
-                    )
-                    if cursor.fetchone()[0] > 0:
-                        collision_type = 1
+                collision_type = step_collision_type(
+                    raw_foot_tile_id,
+                    tileset_names[raw_tileset_id],
+                    water_tilesets,
+                    walkable_by_tileset.get(raw_tileset_id, set()),
+                )
 
                 # Add to map tiles
                 map_tiles.append(

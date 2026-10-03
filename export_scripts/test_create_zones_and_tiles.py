@@ -12,6 +12,21 @@ from create_zones_and_tiles import native_step_tile_ids
 
 
 class NativeStepTileMetadataTest(unittest.TestCase):
+    def test_water_uses_source_tileset_and_foot_sample(self):
+        water = create_zones_and_tiles.water_tileset_names()
+        classify = create_zones_and_tiles.step_collision_type
+        self.assertEqual(classify(0x14, "REDS_HOUSE_1", water, {0x14}), 1)
+        self.assertEqual(classify(0x14, "OVERWORLD", water, set()), 2)
+        self.assertEqual(classify(0x48, "FOREST", water, set()), 2)
+        self.assertEqual(classify(0x32, "SHIP_PORT", water, {0x32}), 1)
+        self.assertEqual(classify(0x48, "SHIP_PORT", water, set()), 0)
+        self.assertEqual(classify(0x32, "OVERWORLD", water, set()), 2)
+        block = bytearray([0x14] * 16)
+        block[4] = 0x01
+        foot, _ = native_step_tile_ids(block, 0)
+        self.assertEqual(classify(foot, "REDS_HOUSE_1", water, {0x01}), 1)
+        self.assertEqual(classify(0x00, "REDS_HOUSE_1", water, {0x14}), 0)
+
     def test_collision_and_encounter_samples_follow_original_half_block_layout(self):
         block = bytes(range(16))
         self.assertEqual(
@@ -57,6 +72,14 @@ class NativeStepTileMetadataTest(unittest.TestCase):
                             """
                         ).fetchone()[0],
                         104,
+                    )
+                    self.assertEqual(
+                        conn.execute("SELECT collision_type FROM tiles WHERE map_id=37 AND local_x=2 AND local_y=7").fetchone()[0],
+                        1,
+                    )
+                    self.assertEqual(
+                        conn.execute("SELECT COUNT(*) FROM tiles JOIN maps ON maps.id=tiles.map_id JOIN tilesets ON tilesets.id=maps.tileset_id WHERE tilesets.name='REDS_HOUSE_1' AND collision_type=2").fetchone()[0],
+                        0,
                     )
                     self.assertEqual(
                         conn.execute(
